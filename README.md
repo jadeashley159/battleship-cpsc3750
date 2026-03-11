@@ -1,10 +1,10 @@
 # battleship-cpsc3750
 CPSC 3750 Final Project
 
-#Project overview
+## Project overview
 A RESTful multiplayer Battleship server supporting 1–N players, configurable grid sizes, persistent player statistics, and full turn-based gameplay. Built with Python/Flask and MySQL.
 
-#Architecture summary
+## Architecture summary
 The server follows a layered architecture:
 - **Flask** handles HTTP routing via Blueprints (players, games, test mode)
 - **MySQL** provides persistent relational storage
@@ -27,7 +27,7 @@ battleship/
 └── .env.example
 ```
 
-#API description
+## API description
 
 ### Players
 | Method | Endpoint | Description |
@@ -57,15 +57,15 @@ battleship/
 | POST | `/test/games/:id/reset` | Reset game state, preserve player stats |
 | POST | `/test/games/:id/set-turn` | Force turn for concurrency testing |
 
-#Team member 
+## Team member 
 - Jade Ashley
 - Ayden Sabol
 
-#AI tool(s) used
+## AI tool(s) used
 Claude 
 Chat GPT 
 
-#Major role of each human + AI
+## Major role of each human + AI
 Jade Ashley - Frontend design, SQL database design and schema implementation 
 Ayden Sabol - Backend design, server architecture, API route implementation 
 Claude - Setup guidance, debugging, explaining requirements, finding and fixing issues when they occur 
