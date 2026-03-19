@@ -29,8 +29,11 @@ def reset():
 def create_player():
     global next_player_id
 
-    data = request.json
+    data = request.get_json()
     username = data.get("username")
+
+    if not data or "username" not in data:
+        return jsonify({"error": "username required"}), 400
 
     if not username:
         return jsonify({"error": "username required"}), 400
@@ -60,15 +63,21 @@ def create_player():
 def create_game():
     global next_game_id
 
-    data = request.json
+    data = request.get_json()
+    if not data or "player_id" not in data:
+        return jsonify({"error": "player_id required"}), 400
+    if not data:
+        return jsonify({"error": "invalid request"}), 400
     creator_id = data.get("creator_id")
     grid_size = data.get("grid_size")
     max_players = data.get("max_players")
+    if creator_id is None or grid_size is None or max_players is None:
+        return jsonify({"error": "missing fields"}), 400
 
     if creator_id not in players:
         return jsonify({"error": "invalid creator"}), 403
 
-    if grid_size < 5 or grid_size > 15:
+    if not isinstance(grid_size, int) or grid_size < 5 or grid_size > 15:
         return jsonify({"error": "invalid grid size"}), 400
 
     if max_players < 1:
@@ -130,6 +139,25 @@ def get_game(game_id):
         "active_players": len(game_players[game_id])
     }), 200
 
+@app.route("/api/players/<int:player_id>/stats", methods=["GET"])
+def get_player_stats(player_id):
+    if player_id not in players:
+        return jsonify({"error": "player not found"}), 404
+
+    stats = players[player_id]["stats"]
+
+    accuracy = 0
+    if stats["total_shots"] > 0:
+        accuracy = stats["total_hits"] / stats["total_shots"]
+
+    return jsonify({
+        "games_played": stats["games_played"],
+        "wins": stats["wins"],
+        "losses": stats["losses"],
+        "total_shots": stats["total_shots"],
+        "total_hits": stats["total_hits"],
+        "accuracy": accuracy
+    }), 200
 
 if __name__ == "__main__":
     app.run(debug=True)
