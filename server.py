@@ -7,6 +7,9 @@ players = {}
 games = {}
 game_players = {}
 
+moves = {}     # game_id -> list of moves
+ships = {}     # game_id -> player_id -> set of (row, col)
+
 next_player_id = 1
 next_game_id = 1
 
@@ -25,6 +28,11 @@ def reset():
 
     next_player_id = 1
     next_game_id = 1
+
+    global moves, ships
+
+    moves = {}
+    ships = {}
 
     return jsonify({"status": "reset"}), 200
 
@@ -98,6 +106,7 @@ def create_game():
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"error": "invalid request"}), 400
+    
 
     creator_id = data.get("creator_id")
     grid_size = data.get("grid_size")
@@ -134,7 +143,63 @@ def create_game():
         "status": "waiting"
     }), 201
 
+@app.route("/api/games/<int:game_id>/place", methods=["POST"])
+def place_ships(game_id):
+    data = request.get_json(silent=True)
+    if not data or "player_id" not in data or "ships" not in data:
+        return jsonify({"error": "invalid request"}), 400
 
+    player_id = data["player_id"]
+    ship_list = data["ships"]
+
+    if game_id not in games:
+        return jsonify({"error": "game not found"}), 404
+
+    if player_id not in players:
+        return jsonify({"error": "invalid player"}), 403
+
+    if player_id not in game_players[game_id]:
+        return jsonify({"error": "player not in game"}), 403
+
+    if game_id not in ships:
+        ships[game_id] = {}
+
+    if player_id in ships[game_id]:
+        return jsonify({"error": "ships already placed"}), 400
+
+    # Validate ships (exactly 3 single-cell ships)
+    if len(ship_list) != 3:
+        return jsonify({"error": "must place 3 ships"}), 400
+
+    ship_cells = set()
+
+    for s in ship_list:
+        row = s.get("row")
+        col = s.get("col")
+
+        if not isinstance(row, int) or not isinstance(col, int):
+            return jsonify({"error": "invalid coordinates"}), 400
+
+        if row < 0 or row >= games[game_id]["grid_size"] or col < 0 or col >= games[game_id]["grid_size"]:
+            return jsonify({"error": "out of bounds"}), 400
+
+        if (row, col) in ship_cells:
+            return jsonify({"error": "duplicate ship placement"}), 400
+
+        ship_cells.add((row, col))
+
+    ships[game_id][player_id] = ship_cells
+
+    # Activate game when all players placed ships
+    if len(ships[game_id]) == len(game_players[game_id]):
+        games[game_id]["status"] = "active"
+
+    ships[game_id][player_id] = ship_cells
+
+    # Activate game when all players have placed ships
+    if len(ships[game_id]) == len(game_players[game_id]):
+        games[game_id]["status"] = "active"
+    return jsonify({"status": "ships placed"}), 200
 # -------------------------
 # JOIN GAME
 # -------------------------
@@ -181,7 +246,109 @@ def get_game(game_id):
         "active_players": len(game_players[game_id])
     }), 200
 
+# -------------------------
+# Fire SHOT
+# -------------------------
 
+from datetime import datetime
+
+@app.route("/api/games/<int:game_id>/fire", methods=["POST"])
+def fire(game_id):
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "invalid request"}), 400
+
+    player_id = data.get("player_id")
+    row = data.get("row")
+    col = data.get("col")
+
+    if game_id not in games:
+        return jsonify({"error": "game not found"}), 404
+
+    game = games[game_id]
+
+    if game["status"] != "active":
+        return jsonify({"error": "game not active"}), 403
+
+    if player_id not in players:
+        return jsonify({"error": "invalid player"}), 403
+
+    if player_id not in game_players[game_id]:
+        return jsonify({"error": "player not in game"}), 403
+
+    # TURN CHECK
+    current_turn_player = game_players[game_id][game["current_turn_index"]]
+    if player_id != current_turn_player:
+        return jsonify({"error": "not your turn"}), 403
+
+    # BOUNDS CHECK
+    if not isinstance(row, int) or not isinstance(col, int):
+        return jsonify({"error": "invalid coordinates"}), 400
+
+    if row < 0 or row >= game["grid_size"] or col < 0 or col >= game["grid_size"]:
+        return jsonify({"error": "out of bounds"}), 400
+
+    # INIT MOVE LIST
+    if game_id not in moves:
+        moves[game_id] = []
+
+    # DUPLICATE CHECK
+    for m in moves[game_id]:
+        if m["row"] == row and m["col"] == col:
+            return jsonify({"error": "duplicate move"}), 400
+
+    # HIT OR MISS
+    hit = False
+    for pid, ship_cells in ships.get(game_id, {}).items():
+        if pid != player_id and (row, col) in ship_cells:
+            hit = True
+            ship_cells.remove((row, col))
+            break
+
+    result = "hit" if hit else "miss"
+
+    # LOG MOVE
+    moves[game_id].append({
+        "player_id": player_id,
+        "row": row,
+        "col": col,
+        "result": result,
+        "timestamp": datetime.utcnow().isoformat()
+    })
+
+    # CHECK WIN
+    winner = None
+    for pid, ship_cells in ships.get(game_id, {}).items():
+        all_destroyed = True
+        for pid, ship_cells in ships.get(game_id, {}).items():
+            if pid != player_id and len(ship_cells) > 0:
+                all_destroyed = False
+
+        if all_destroyed:
+            winner = player_id
+
+    if winner:
+        game["status"] = "finished"
+        return jsonify({
+            "result": result,
+            "next_player_id": None,
+            "game_status": "finished",
+            "winner_id": winner
+        }), 200
+
+    # ADVANCE TURN
+    game["current_turn_index"] = (game["current_turn_index"] + 1) % len(game_players[game_id])
+    next_player = game_players[game_id][game["current_turn_index"]]
+
+    return jsonify({
+        "result": result,
+        "next_player_id": next_player,
+        "game_status": "active"
+    }), 200
+
+@app.route("/api/games/<int:game_id>/moves", methods=["GET"])
+def get_moves(game_id):
+    return jsonify(moves.get(game_id, [])), 200
 # -------------------------
 # RUN SERVER
 # -------------------------
