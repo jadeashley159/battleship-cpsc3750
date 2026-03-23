@@ -13,6 +13,13 @@ ships = {}     # game_id -> player_id -> set of (row, col)
 next_player_id = 1
 next_game_id = 1
 
+TEST_PASSWORD = "clemson-test-2026"
+
+def check_test_auth():
+    header = request.headers.get("X-Test-Password")
+    if header != TEST_PASSWORD:
+        return False
+    return True
 
 # -------------------------
 # RESET SYSTEM
@@ -200,6 +207,51 @@ def place_ships(game_id):
     if len(ships[game_id]) == len(game_players[game_id]):
         games[game_id]["status"] = "active"
     return jsonify({"status": "ships placed"}), 200
+
+@app.route("/api/test/games/<int:game_id>/ships", methods=["POST"])
+def test_place_ships(game_id):
+    if not check_test_auth():
+        return jsonify({"error": "forbidden"}), 403
+
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "invalid request"}), 400
+
+    player_id = data.get("player_id")
+    ship_list = data.get("ships")
+
+    if game_id not in games:
+        return jsonify({"error": "game not found"}), 404
+
+    if game_id not in ships:
+        ships[game_id] = {}
+
+    ship_cells = set()
+
+    for s in ship_list:
+        row = s.get("row")
+        col = s.get("col")
+
+        ship_cells.add((row, col))
+
+    ships[game_id][player_id] = ship_cells
+
+    return jsonify({"status": "ok"}), 200
+
+@app.route("/api/test/games/<int:game_id>/board/<int:player_id>", methods=["GET"])
+def test_board(game_id, player_id):
+    if not check_test_auth():
+        return jsonify({"error": "forbidden"}), 403
+
+    if game_id not in ships:
+        return jsonify({"ships": []}), 200
+
+    player_ships = list(ships.get(game_id, {}).get(player_id, []))
+
+    return jsonify({
+        "ships": player_ships,
+        "moves": moves.get(game_id, [])
+    }), 200
 # -------------------------
 # JOIN GAME
 # -------------------------
@@ -266,9 +318,8 @@ def fire(game_id):
         return jsonify({"error": "game not found"}), 404
 
     game = games[game_id]
-
     if game["status"] != "active":
-        return jsonify({"error": "game not active"}), 403
+        return jsonify({"error": "game not active"}), 400
 
     if player_id not in players:
         return jsonify({"error": "invalid player"}), 403
