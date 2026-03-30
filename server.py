@@ -208,6 +208,22 @@ def place_ships(game_id):
         games[game_id]["status"] = "active"
     return jsonify({"status": "ships placed"}), 200
 
+@app.route("/api/test/games/<int:game_id>/restart", methods=["POST"])
+def test_restart(game_id):
+    if not check_test_auth():
+        return jsonify({"error": "forbidden"}), 403
+
+    if game_id not in games:
+        return jsonify({"error": "game not found"}), 404
+
+    # Clear ships and moves, reset status — player stats are PRESERVED
+    ships[game_id] = {}
+    moves[game_id] = []
+    games[game_id]["status"] = "waiting"
+    games[game_id]["current_turn_index"] = 0
+
+    return jsonify({"status": "restarted"}), 200
+
 @app.route("/api/test/games/<int:game_id>/ships", methods=["POST"])
 def test_place_ships(game_id):
     if not check_test_auth():
