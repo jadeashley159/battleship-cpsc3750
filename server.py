@@ -246,7 +246,9 @@ def test_place_ships(game_id):
     ships[game_id][player_id] = ship_cells
 
     # Activate game when ALL players have placed ships
-    if all_ships_placed(game_id):
+    players_in_game = game_players.get(game_id, [])
+    game_ships = ships.get(game_id, {})
+    if len(players_in_game) > 0 and all(p in game_ships for p in players_in_game):
         games[game_id]["status"] = "active"
 
     return jsonify({"status": "ok"}), 200
