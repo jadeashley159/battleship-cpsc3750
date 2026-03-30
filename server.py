@@ -330,13 +330,13 @@ def fire(game_id):
 
     game = games[game_id]
 
-    # Block firing in finished games
+    # Block firing in finished games FIRST
     if game["status"] == "finished":
         return jsonify({"error": "game already finished"}), 409
 
     # Block firing before all ships are placed
     if game["status"] != "active":
-        return jsonify({"error": "game not active — all players must place ships first"}), 400
+        return jsonify({"error": "game not active"}), 400
 
     if player_id not in players:
         return jsonify({"error": "invalid player"}), 403
@@ -359,7 +359,7 @@ def fire(game_id):
     if game_id not in moves:
         moves[game_id] = []
 
-    # Hit detection — check ALL opponents' ships
+    # Hit detection
     hit = False
     for pid, ship_cells in ships.get(game_id, {}).items():
         if pid != player_id and (row, col) in ship_cells:
@@ -369,7 +369,7 @@ def fire(game_id):
 
     result = "hit" if hit else "miss"
 
-    # Update shooter stats
+    # Update shooter stats immediately
     players[player_id]["stats"]["total_shots"] += 1
     if hit:
         players[player_id]["stats"]["total_hits"] += 1
@@ -383,7 +383,7 @@ def fire(game_id):
         "timestamp": datetime.utcnow().isoformat()
     })
 
-    # Win condition — are all opponents out of ships?
+    # Win condition
     living_opponents = [
         p for p in game_players[game_id]
         if p != player_id and len(ships.get(game_id, {}).get(p, set())) > 0
@@ -391,8 +391,6 @@ def fire(game_id):
 
     if len(living_opponents) == 0:
         game["status"] = "finished"
-
-        # Update stats for everyone
         for pid in game_players[game_id]:
             players[pid]["stats"]["games_played"] += 1
             if pid == player_id:
@@ -407,7 +405,7 @@ def fire(game_id):
             "winner_id":      player_id
         }), 200
 
-    # Advance turn — skip players with no ships left
+    # Advance turn
     n   = len(game_players[game_id])
     idx = game["current_turn_index"]
     for _ in range(n):
