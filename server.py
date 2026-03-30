@@ -238,14 +238,16 @@ def test_place_ships(game_id):
         ships[game_id] = {}
 
     ship_cells = set()
-
     for s in ship_list:
         row = s.get("row")
         col = s.get("col")
-
         ship_cells.add((row, col))
 
     ships[game_id][player_id] = ship_cells
+
+    # Activate game when ALL players have placed ships
+    if all_ships_placed(game_id):
+        games[game_id]["status"] = "active"
 
     return jsonify({"status": "ok"}), 200
 
