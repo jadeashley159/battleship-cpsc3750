@@ -273,7 +273,7 @@ def join_game(game_id):
         return jsonify({"error": "already joined"}), 400
 
     if len(game_players[game_id]) >= games[game_id]["max_players"]:
-        return jsonify({"error": "game full"}), 400
+        return jsonify({"error": "game full"}), 409
 
     game_players[game_id].append(player_id)
 
@@ -311,15 +311,21 @@ def fire(game_id):
         return jsonify({"error": "invalid request"}), 400
 
     player_id = data.get("player_id")
-    row = data.get("row")
-    col = data.get("col")
+    row       = data.get("row")
+    col       = data.get("col")
 
     if game_id not in games:
         return jsonify({"error": "game not found"}), 404
 
     game = games[game_id]
+
+    # Block firing in finished games
+    if game["status"] == "finished":
+        return jsonify({"error": "game already finished"}), 409
+
+    # Block firing before all ships are placed
     if game["status"] != "active":
-        return jsonify({"error": "game not active"}), 400
+        return jsonify({"error": "game not active — all players must place ships first"}), 400
 
     if player_id not in players:
         return jsonify({"error": "invalid player"}), 403
@@ -327,74 +333,84 @@ def fire(game_id):
     if player_id not in game_players[game_id]:
         return jsonify({"error": "player not in game"}), 403
 
-    # TURN CHECK
+    # Turn check
     current_turn_player = game_players[game_id][game["current_turn_index"]]
     if player_id != current_turn_player:
         return jsonify({"error": "not your turn"}), 403
 
-    # BOUNDS CHECK
+    # Bounds check
     if not isinstance(row, int) or not isinstance(col, int):
         return jsonify({"error": "invalid coordinates"}), 400
 
     if row < 0 or row >= game["grid_size"] or col < 0 or col >= game["grid_size"]:
         return jsonify({"error": "out of bounds"}), 400
 
-    # INIT MOVE LIST
     if game_id not in moves:
         moves[game_id] = []
 
-    # DUPLICATE CHECK
-    for m in moves[game_id]:
-        if m["row"] == row and m["col"] == col:
-            return jsonify({"error": "duplicate move"}), 400
-
-    # HIT OR MISS
+    # Hit detection — check ALL opponents' ships
     hit = False
     for pid, ship_cells in ships.get(game_id, {}).items():
         if pid != player_id and (row, col) in ship_cells:
             hit = True
-            ship_cells.remove((row, col))
+            ship_cells.discard((row, col))
             break
 
     result = "hit" if hit else "miss"
 
-    # LOG MOVE
+    # Update shooter stats
+    players[player_id]["stats"]["total_shots"] += 1
+    if hit:
+        players[player_id]["stats"]["total_hits"] += 1
+
+    # Log move
     moves[game_id].append({
         "player_id": player_id,
-        "row": row,
-        "col": col,
-        "result": result,
+        "row":       row,
+        "col":       col,
+        "result":    result,
         "timestamp": datetime.utcnow().isoformat()
     })
 
-    # CHECK WIN
-    winner = None
-    for pid, ship_cells in ships.get(game_id, {}).items():
-        all_destroyed = True
-        for pid, ship_cells in ships.get(game_id, {}).items():
-            if pid != player_id and len(ship_cells) > 0:
-                all_destroyed = False
+    # Win condition — are all opponents out of ships?
+    living_opponents = [
+        p for p in game_players[game_id]
+        if p != player_id and len(ships.get(game_id, {}).get(p, set())) > 0
+    ]
 
-        if all_destroyed:
-            winner = player_id
-
-    if winner:
+    if len(living_opponents) == 0:
         game["status"] = "finished"
+
+        # Update stats for everyone
+        for pid in game_players[game_id]:
+            players[pid]["stats"]["games_played"] += 1
+            if pid == player_id:
+                players[pid]["stats"]["wins"] += 1
+            else:
+                players[pid]["stats"]["losses"] += 1
+
         return jsonify({
-            "result": result,
+            "result":         result,
             "next_player_id": None,
-            "game_status": "finished",
-            "winner_id": winner
+            "game_status":    "finished",
+            "winner_id":      player_id
         }), 200
 
-    # ADVANCE TURN
-    game["current_turn_index"] = (game["current_turn_index"] + 1) % len(game_players[game_id])
-    next_player = game_players[game_id][game["current_turn_index"]]
+    # Advance turn — skip players with no ships left
+    n   = len(game_players[game_id])
+    idx = game["current_turn_index"]
+    for _ in range(n):
+        idx = (idx + 1) % n
+        candidate = game_players[game_id][idx]
+        if len(ships.get(game_id, {}).get(candidate, set())) > 0:
+            break
+    game["current_turn_index"] = idx
+    next_player = game_players[game_id][idx]
 
     return jsonify({
-        "result": result,
+        "result":         result,
         "next_player_id": next_player,
-        "game_status": "active"
+        "game_status":    "active"
     }), 200
 
 @app.route("/api/games/<int:game_id>/moves", methods=["GET"])
