@@ -197,15 +197,10 @@ def place_ships(game_id):
 
     ships[game_id][player_id] = ship_cells
 
-    # Activate game when all players placed ships
-    if len(ships[game_id]) == len(game_players[game_id]):
-        games[game_id]["status"] = "active"
-
-    ships[game_id][player_id] = ship_cells
-
     # Activate game when all players have placed ships
     if len(ships[game_id]) == len(game_players[game_id]):
         games[game_id]["status"] = "active"
+
     return jsonify({"status": "ships placed"}), 200
 
 @app.route("/api/test/games/<int:game_id>/restart", methods=["POST"])
