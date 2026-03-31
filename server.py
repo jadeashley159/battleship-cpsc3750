@@ -67,6 +67,8 @@ def reset():
     Ship.query.delete()
     GamePlayer.query.delete()
     Game.query.delete()
+    Player.query.delete()   
+
     db.session.commit()
     return jsonify({"status": "reset"}), 200
 
@@ -192,7 +194,10 @@ def place_ships(game_id):
 
     db.session.commit()
 
-    placed = db.session.query(Ship.player_id).filter_by(game_id=game_id).distinct().count()
+    placed = db.session.query(Ship.player_id)\
+    .filter_by(game_id=game_id)\
+    .group_by(Ship.player_id)\
+    .count()
     total = GamePlayer.query.filter_by(game_id=game_id).count()
 
     if placed == total:
@@ -212,6 +217,8 @@ def fire(game_id):
 
     game = Game.query.get(game_id)
 
+    if game.status == "finished":
+        return jsonify({"error": "game finished"}), 409
     if game.status != "active":
         return jsonify({"error": "not active"}), 400
 
@@ -248,9 +255,11 @@ def fire(game_id):
 
     db.session.commit()
 
-    remaining = Ship.query.filter(Ship.game_id == game_id).count()
-
-    if remaining == 0:
+    living_opponents = db.session.query(Ship.player_id)\
+    .filter(Ship.game_id == game_id)\
+    .distinct().all()
+    
+    if len(living_opponents) == 1:
         game.status = "finished"
         for gp in players:
             p = Player.query.get(gp.player_id)
@@ -268,7 +277,21 @@ def fire(game_id):
             "winner_id": player_id
         })
 
-    game.current_turn_index = (game.current_turn_index + 1) % len(players)
+    players_list = GamePlayer.query.filter_by(game_id=game_id)\
+    .order_by(GamePlayer.turn_order).all()
+    
+    n = len(players_list)
+    idx = game.current_turn_index
+    for _ in range(n):
+        idx = (idx + 1) % n
+        candidate = players_list[idx].player_id
+        remaining = Ship.query.filter_by(
+            game_id=game_id,
+            player_id=candidate
+            ).count()
+        if remaining > 0:
+            break
+    game.current_turn_index = idx
     db.session.commit()
 
     return jsonify({
