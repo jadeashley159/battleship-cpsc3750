@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import os
+from sqlalchemy import text
 
 app = Flask(__name__)
 
@@ -67,6 +68,13 @@ def reset():
     Ship.query.delete()
     GamePlayer.query.delete()
     Game.query.delete()
+    Player.query.delete()
+
+    db.session.execute(text("DELETE FROM sqlite_sequence WHERE name='game'"))
+    db.session.execute(text("DELETE FROM sqlite_sequence WHERE name='player'"))
+    db.session.execute(text("DELETE FROM sqlite_sequence WHERE name='ship'"))
+    db.session.execute(text("DELETE FROM sqlite_sequence WHERE name='move'"))
+
     db.session.commit()
     return jsonify({"status": "reset"}), 200
 
