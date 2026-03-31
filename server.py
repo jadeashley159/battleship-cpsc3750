@@ -78,15 +78,16 @@ def reset():
     Game.query.delete()
     Player.query.delete()
 
-    # reset sqlite autoincrement counters
-    db.session.execute(text("DELETE FROM sqlite_sequence WHERE name='game'"))
-    db.session.execute(text("DELETE FROM sqlite_sequence WHERE name='player'"))
-    db.session.execute(text("DELETE FROM sqlite_sequence WHERE name='ship'"))
-    db.session.execute(text("DELETE FROM sqlite_sequence WHERE name='move'"))
+    try:
+        db.session.execute(text("DELETE FROM sqlite_sequence WHERE name='game'"))
+        db.session.execute(text("DELETE FROM sqlite_sequence WHERE name='player'"))
+        db.session.execute(text("DELETE FROM sqlite_sequence WHERE name='ship'"))
+        db.session.execute(text("DELETE FROM sqlite_sequence WHERE name='move'"))
+    except Exception:
+        pass
 
     db.session.commit()
     return jsonify({"status": "reset"}), 200
-
 
 # -------------------------
 # CREATE PLAYER
