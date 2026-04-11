@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import os
+import re
 from sqlalchemy import text
 
 app = Flask(__name__)
@@ -12,6 +13,7 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 
 TEST_PASSWORD = "clemson-test-2026"
+USERNAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
 def check_test_auth():
@@ -37,7 +39,7 @@ class Game(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     grid_size = db.Column(db.Integer, nullable=False)
     max_players = db.Column(db.Integer, nullable=False)
-    status = db.Column(db.String(20), default="waiting", nullable=False)
+    status = db.Column(db.String(20), default="waiting_setup", nullable=False)
     current_turn_index = db.Column(db.Integer, default=0, nullable=False)
 
 
@@ -66,6 +68,18 @@ class Move(db.Model):
 
 
 # -------------------------
+# HEALTH
+# -------------------------
+
+@app.route("/api/health", methods=["GET"])
+def health():
+    return jsonify({
+        "status": "ok",
+        "api_version": "2.3"
+    }), 200
+
+
+# -------------------------
 # RESET
 # full wipe so tests get clean IDs
 # -------------------------
@@ -89,29 +103,41 @@ def reset():
     db.session.commit()
     return jsonify({"status": "reset"}), 200
 
+
 # -------------------------
 # CREATE PLAYER
+# idempotent for duplicate usernames to keep class setup from collapsing
 # -------------------------
 
 @app.route("/api/players", methods=["POST"])
 def create_player():
     data = request.get_json(silent=True)
     if not data or "username" not in data:
-        return jsonify({"error": "username required"}), 400
+        return jsonify({"error": "bad_request"}), 400
 
     username = data["username"]
+
     if not isinstance(username, str) or not username.strip():
-        return jsonify({"error": "username required"}), 400
+        return jsonify({"error": "bad_request"}), 400
+
+    if not USERNAME_RE.fullmatch(username):
+        return jsonify({"error": "bad_request"}), 400
 
     existing = Player.query.filter_by(username=username).first()
     if existing:
-        return jsonify({"error": "duplicate username"}), 400
+        return jsonify({
+            "player_id": existing.id,
+            "username": existing.username
+        }), 201
 
     player = Player(username=username)
     db.session.add(player)
     db.session.commit()
 
-    return jsonify({"player_id": player.id}), 201
+    return jsonify({
+        "player_id": player.id,
+        "username": player.username
+    }), 201
 
 
 # -------------------------
@@ -146,14 +172,14 @@ def get_stats(player_id):
 def create_game():
     data = request.get_json(silent=True)
     if not data:
-        return jsonify({"error": "invalid request"}), 400
+        return jsonify({"error": "bad_request"}), 400
 
     creator_id = data.get("creator_id")
     grid_size = data.get("grid_size")
     max_players = data.get("max_players")
 
     if creator_id is None or grid_size is None or max_players is None:
-        return jsonify({"error": "missing fields"}), 400
+        return jsonify({"error": "bad_request"}), 400
 
     if not isinstance(grid_size, int) or grid_size < 5 or grid_size > 15:
         return jsonify({"error": "invalid grid size"}), 400
@@ -168,7 +194,7 @@ def create_game():
     game = Game(
         grid_size=grid_size,
         max_players=max_players,
-        status="waiting",
+        status="waiting_setup",
         current_turn_index=0
     )
     db.session.add(game)
@@ -177,7 +203,10 @@ def create_game():
     db.session.add(GamePlayer(game_id=game.id, player_id=creator.id, turn_order=0))
     db.session.commit()
 
-    return jsonify({"game_id": game.id, "status": "waiting"}), 201
+    return jsonify({
+        "game_id": game.id,
+        "status": "waiting_setup"
+    }), 201
 
 
 # -------------------------
@@ -188,13 +217,16 @@ def create_game():
 def join_game(game_id):
     data = request.get_json(silent=True)
     if not data or "player_id" not in data:
-        return jsonify({"error": "player_id required"}), 400
+        return jsonify({"error": "bad_request"}), 400
 
     player_id = data["player_id"]
 
     game = Game.query.get(game_id)
     if not game:
         return jsonify({"error": "game not found"}), 404
+
+    if game.status != "waiting_setup":
+        return jsonify({"error": "game already started"}), 409
 
     player = Player.query.get(player_id)
     if not player:
@@ -247,7 +279,7 @@ def get_game(game_id):
 def place_ships(game_id):
     data = request.get_json(silent=True)
     if not data or "player_id" not in data or "ships" not in data:
-        return jsonify({"error": "invalid request"}), 400
+        return jsonify({"error": "bad_request"}), 400
 
     player_id = data["player_id"]
     ship_list = data["ships"]
@@ -295,9 +327,9 @@ def place_ships(game_id):
 
     db.session.commit()
 
-    placed = db.session.query(Ship.player_id)\
-        .filter_by(game_id=game_id)\
-        .group_by(Ship.player_id)\
+    placed = db.session.query(Ship.player_id) \
+        .filter_by(game_id=game_id) \
+        .group_by(Ship.player_id) \
         .count()
 
     total = GamePlayer.query.filter_by(game_id=game_id).count()
@@ -317,14 +349,14 @@ def place_ships(game_id):
 def fire(game_id):
     data = request.get_json(silent=True)
     if not data:
-        return jsonify({"error": "invalid request"}), 400
+        return jsonify({"error": "bad_request"}), 400
 
     player_id = data.get("player_id")
     row = data.get("row")
     col = data.get("col")
 
     if player_id is None or row is None or col is None:
-        return jsonify({"error": "missing fields"}), 400
+        return jsonify({"error": "bad_request"}), 400
 
     game = Game.query.get(game_id)
     if not game:
@@ -351,9 +383,9 @@ def fire(game_id):
 
     existing_move = Move.query.filter_by(game_id=game_id, row=row, col=col).first()
     if existing_move:
-        return jsonify({"error": "duplicate move"}), 400
+        return jsonify({"error": "duplicate move"}), 409
 
-    players_in_game = GamePlayer.query.filter_by(game_id=game_id)\
+    players_in_game = GamePlayer.query.filter_by(game_id=game_id) \
         .order_by(GamePlayer.turn_order).all()
 
     if not players_in_game:
@@ -463,7 +495,7 @@ def get_moves(game_id):
 
 # -------------------------
 # TEST RESTART
-# preserve player stats
+# preserve player stats, but secure first
 # -------------------------
 
 @app.route("/api/test/games/<int:game_id>/restart", methods=["POST"])
@@ -478,12 +510,12 @@ def test_restart(game_id):
     Ship.query.filter_by(game_id=game_id).delete()
     Move.query.filter_by(game_id=game_id).delete()
 
-    game.status = "waiting"
+    game.status = "waiting_setup"
     game.current_turn_index = 0
 
     db.session.commit()
 
-    return jsonify({"status": "restarted"}), 200
+    return jsonify({"status": "reset"}), 200
 
 
 # -------------------------
@@ -498,7 +530,7 @@ def test_place_ships(game_id):
 
     data = request.get_json(silent=True)
     if not data or "player_id" not in data or "ships" not in data:
-        return jsonify({"error": "invalid request"}), 400
+        return jsonify({"error": "bad_request"}), 400
 
     player_id = data["player_id"]
     ship_list = data["ships"]
@@ -544,9 +576,9 @@ def test_place_ships(game_id):
 
     db.session.commit()
 
-    placed = db.session.query(Ship.player_id)\
-        .filter_by(game_id=game_id)\
-        .group_by(Ship.player_id)\
+    placed = db.session.query(Ship.player_id) \
+        .filter_by(game_id=game_id) \
+        .group_by(Ship.player_id) \
         .count()
 
     total = GamePlayer.query.filter_by(game_id=game_id).count()
@@ -577,10 +609,7 @@ def test_board(game_id, player_id):
     ships_rows = Ship.query.filter_by(game_id=game_id, player_id=player_id).all()
     moves_rows = Move.query.filter_by(game_id=game_id).order_by(Move.id).all()
 
-    ships_payload = []
-    for s in ships_rows:
-        ships_payload.append([s.row, s.col])
-
+    ships_payload = sorted([[s.row, s.col] for s in ships_rows])
     moves_payload = []
     for m in moves_rows:
         moves_payload.append({
@@ -592,6 +621,8 @@ def test_board(game_id, player_id):
         })
 
     return jsonify({
+        "game_id": game_id,
+        "player_id": player_id,
         "ships": ships_payload,
         "moves": moves_payload
     }), 200
