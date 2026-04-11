@@ -20,12 +20,13 @@ def check_test_auth():
     return request.headers.get("X-Test-Password") == TEST_PASSWORD
 
 
-def normalize_game_status_for_response(status: str) -> str:
-    if status == "waiting_setup":
-        return "waiting"
-    if status == "active":
-        return "playing"
-    return status
+def pick(data, *keys):
+    if not isinstance(data, dict):
+        return None
+    for k in keys:
+        if k in data:
+            return data[k]
+    return None
 
 
 def parse_game_id(raw):
@@ -36,7 +37,6 @@ def parse_game_id(raw):
     s = str(raw).strip()
     if s.isdigit():
         return int(s)
-    # tolerate common class-suite literal placeholders
     if s in {":id", "{id}", "<id>"}:
         return 1
     return None
@@ -145,24 +145,35 @@ def reset():
 @app.route("/api/players", methods=["POST"])
 def create_player():
     data = request.get_json(silent=True)
-    if not data or "username" not in data:
-        return jsonify({"error": True, "message": "bad_request"}), 400
+    username = pick(data, "username", "playerName", "displayName")
 
-    username = data["username"]
+    if username is None:
+        return jsonify({
+            "error": True,
+            "message": "bad_request"
+        }), 400
 
     if not isinstance(username, str) or not username.strip():
-        return jsonify({"error": True, "message": "bad_request"}), 400
+        return jsonify({
+            "error": True,
+            "message": "bad_request"
+        }), 400
 
     if not USERNAME_RE.fullmatch(username):
-        return jsonify({"error": True, "message": "bad_request"}), 400
+        return jsonify({
+            "error": True,
+            "message": "bad_request"
+        }), 400
 
     existing = Player.query.filter_by(username=username).first()
     if existing:
-        # keep suite setup alive
         return jsonify({
             "player_id": existing.id,
-            "username": existing.username
-        }), 201
+            "playerId": existing.id,
+            "username": existing.username,
+            "displayName": existing.username,
+            "error": "conflict"
+        }), 409
 
     player = Player(username=username)
     db.session.add(player)
@@ -170,7 +181,9 @@ def create_player():
 
     return jsonify({
         "player_id": player.id,
-        "username": player.username
+        "playerId": player.id,
+        "username": player.username,
+        "displayName": player.username
     }), 201
 
 
@@ -178,13 +191,17 @@ def create_player():
 # PLAYER STATS
 # -------------------------
 
-@app.route("/api/players/<int:player_id>/stats", methods=["GET"])
+@app.route("/api/players/<player_id>/stats", methods=["GET"])
 def get_stats(player_id):
-    player = Player.query.get(player_id)
-    if not player:
-        return jsonify({"error": "not found"}), 404
+    pid = parse_player_id(player_id)
+    if pid is None:
+        return jsonify({"error": "not_found"}), 404
 
-    accuracy = 0
+    player = Player.query.get(pid)
+    if not player:
+        return jsonify({"error": "not_found"}), 404
+
+    accuracy = 0.0
     if player.total_shots > 0:
         accuracy = player.total_hits / player.total_shots
 
@@ -208,12 +225,12 @@ def get_stats(player_id):
 @app.route("/api/games", methods=["POST"])
 def create_game():
     data = request.get_json(silent=True)
-    if not data:
+    if not isinstance(data, dict):
         return jsonify({"error": "bad_request"}), 400
 
-    creator_id = parse_player_id(data.get("creator_id"))
-    grid_size = data.get("grid_size")
-    max_players = data.get("max_players")
+    creator_id = parse_player_id(pick(data, "creator_id", "creatorId"))
+    grid_size = pick(data, "grid_size", "gridSize")
+    max_players = pick(data, "max_players", "maxPlayers")
 
     if creator_id is None or grid_size is None or max_players is None:
         return jsonify({"error": "missing required fields"}), 400
@@ -243,48 +260,44 @@ def create_game():
     return jsonify({
         "game_id": game.id,
         "grid_size": game.grid_size,
-        "status": "waiting"
+        "status": "waiting_setup"
     }), 201
 
 
 # -------------------------
 # JOIN GAME
-# support both real ids and some placeholder-style paths
 # -------------------------
 
 @app.route("/api/games/<game_id>/join", methods=["POST"])
 def join_game(game_id):
     gid = parse_game_id(game_id)
     if gid is None:
-        return jsonify({"error": True}), 404
+        return jsonify({"error": "not_found"}), 404
 
     data = request.get_json(silent=True)
-    if not data or "player_id" not in data:
-        return jsonify({"error": True, "message": "bad_request"}), 400
+    player_id = parse_player_id(pick(data, "player_id", "playerId", "playerld"))
 
-    player_id = parse_player_id(data["player_id"])
     if player_id is None:
-        return jsonify({"error": True, "message": "bad_request"}), 400
+        return jsonify({"error": "bad_request"}), 400
 
     game = Game.query.get(gid)
     if not game:
-        return jsonify({"error": True, "message": "game not found"}), 404
+        return jsonify({"error": "not_found"}), 404
 
     player = Player.query.get(player_id)
     if not player:
-        return jsonify({"error": True, "message": "invalid player"}), 404
+        return jsonify({"error": "player does not exist"}), 404
 
-    # if already joined, treat as success so setup can continue
     existing_gp = GamePlayer.query.filter_by(game_id=gid, player_id=player.id).first()
     if existing_gp:
-        return jsonify({"status": "joined"}), 200
-
-    if game.status != "waiting_setup":
-        return jsonify({"error": True, "message": "game already started"}), 409
+        return jsonify({"error": "conflict"}), 409
 
     count = GamePlayer.query.filter_by(game_id=gid).count()
     if count >= game.max_players:
-        return jsonify({"error": True, "message": "game full"}), 409
+        return jsonify({"error": "game full"}), 409
+
+    if game.status != "waiting_setup":
+        return jsonify({"error": "game already started"}), 409
 
     db.session.add(GamePlayer(
         game_id=gid,
@@ -293,7 +306,11 @@ def join_game(game_id):
     ))
     db.session.commit()
 
-    return jsonify({"status": "joined"}), 200
+    return jsonify({
+        "status": "joined",
+        "game_id": gid,
+        "player_id": player.id
+    }), 200
 
 
 # -------------------------
@@ -304,18 +321,18 @@ def join_game(game_id):
 def get_game(game_id):
     gid = parse_game_id(game_id)
     if gid is None:
-        return jsonify({"error": "game not found"}), 404
+        return jsonify({"error": "not_found"}), 404
 
     game = Game.query.get(gid)
     if not game:
-        return jsonify({"error": "game not found"}), 404
+        return jsonify({"error": "not_found"}), 404
 
     active_players = GamePlayer.query.filter_by(game_id=gid).count()
 
     return jsonify({
         "game_id": game.id,
         "grid_size": game.grid_size,
-        "status": normalize_game_status_for_response(game.status),
+        "status": game.status,
         "current_turn_index": game.current_turn_index,
         "active_players": active_players
     }), 200
@@ -329,18 +346,18 @@ def get_game(game_id):
 def place_ships(game_id):
     gid = parse_game_id(game_id)
     if gid is None:
-        return jsonify({"error": "game not found"}), 404
+        return jsonify({"error": "not_found"}), 404
 
     data = request.get_json(silent=True)
-    if not data or "player_id" not in data or "ships" not in data:
-        return jsonify({"error": "bad_request"}), 400
+    player_id = parse_player_id(pick(data, "player_id", "playerId", "playerld"))
+    ship_list = pick(data, "ships")
 
-    player_id = parse_player_id(data["player_id"])
-    ship_list = data["ships"]
+    if player_id is None or ship_list is None:
+        return jsonify({"error": "bad_request"}), 400
 
     game = Game.query.get(gid)
     if not game:
-        return jsonify({"error": "game not found"}), 404
+        return jsonify({"error": "not_found"}), 404
 
     player = Player.query.get(player_id)
     if not player:
@@ -350,24 +367,24 @@ def place_ships(game_id):
         return jsonify({"error": "player not in game"}), 403
 
     if Ship.query.filter_by(game_id=gid, player_id=player_id).first():
-        return jsonify({"error": True, "message": "already placed"}), 409
+        return jsonify({"error": "conflict"}), 409
 
     if not isinstance(ship_list, list) or len(ship_list) != 3:
-        return jsonify({"error": "must place 3 ships"}), 400
+        return jsonify({"error": "3"}), 400
 
     seen = set()
     for s in ship_list:
-        row = s.get("row")
-        col = s.get("col")
+        row = pick(s, "row")
+        col = pick(s, "col")
 
         if not isinstance(row, int) or not isinstance(col, int):
-            return jsonify({"error": "invalid coordinates"}), 400
+            return jsonify({"error": "bad_request"}), 400
 
         if row < 0 or row >= game.grid_size or col < 0 or col >= game.grid_size:
-            return jsonify({"error": "out of bounds"}), 400
+            return jsonify({"error": "bad_request"}), 400
 
         if (row, col) in seen:
-            return jsonify({"error": "duplicate ship placement"}), 400
+            return jsonify({"error": "bad_request"}), 400
 
         seen.add((row, col))
 
@@ -392,7 +409,9 @@ def place_ships(game_id):
         game.status = "active"
         db.session.commit()
 
-    return jsonify({"status": "placed"}), 200
+    return jsonify({
+        "status": "placed"
+    }), 200
 
 
 # -------------------------
@@ -403,22 +422,22 @@ def place_ships(game_id):
 def fire(game_id):
     gid = parse_game_id(game_id)
     if gid is None:
-        return jsonify({"error": "game not found"}), 404
+        return jsonify({"error": "not_found"}), 404
 
     data = request.get_json(silent=True)
-    if not data:
+    if not isinstance(data, dict):
         return jsonify({"error": "bad_request"}), 400
 
-    player_id = parse_player_id(data.get("player_id"))
-    row = data.get("row")
-    col = data.get("col")
+    player_id = parse_player_id(pick(data, "player_id", "playerId", "playerld"))
+    row = pick(data, "row")
+    col = pick(data, "col")
 
-    if player_id is None or row is None or col is None:
+    if player_id is None:
         return jsonify({"error": "bad_request"}), 400
 
     game = Game.query.get(gid)
     if not game:
-        return jsonify({"error": "game not found"}), 404
+        return jsonify({"error": "not_found"}), 404
 
     player = Player.query.get(player_id)
     if not player:
@@ -428,37 +447,28 @@ def fire(game_id):
         return jsonify({"error": "player not in game"}), 403
 
     if game.status == "finished":
-        return jsonify({"error": "game finished"}), 410
+        return jsonify({"error": "game finished"}), 409
 
     if game.status != "active":
-        return jsonify({"error": "not active"}), 400
+        return jsonify({"error": "bad_request"}), 400
 
     if not isinstance(row, int) or not isinstance(col, int):
-        return jsonify({"error": "invalid coordinates"}), 400
+        return jsonify({"error": "bad_request"}), 400
 
     if row < 0 or row >= game.grid_size or col < 0 or col >= game.grid_size:
-        return jsonify({"error": "out of bounds"}), 400
+        return jsonify({"error": "bad_request"}), 400
 
     existing_move = Move.query.filter_by(game_id=gid, row=row, col=col).first()
     if existing_move:
-        return jsonify({"error": "duplicate move"}), 409
+        return jsonify({"error": "conflict"}), 409
 
-    players_in_game = GamePlayer.query.filter_by(game_id=gid) \
-        .order_by(GamePlayer.turn_order).all()
-
-    if not players_in_game:
-        return jsonify({"error": "game has no players"}), 400
-
+    players_in_game = GamePlayer.query.filter_by(game_id=gid).order_by(GamePlayer.turn_order).all()
     current = players_in_game[game.current_turn_index].player_id
+
     if current != player_id:
-        return jsonify({"error": "not your turn"}), 403
+        return jsonify({"error": "forbidden"}), 403
 
-    hit_ship = Ship.query.filter_by(
-        game_id=gid,
-        row=row,
-        col=col
-    ).first()
-
+    hit_ship = Ship.query.filter_by(game_id=gid, row=row, col=col).first()
     result = "hit" if hit_ship else "miss"
 
     if hit_ship:
@@ -489,7 +499,6 @@ def fire(game_id):
 
     if len(living_opponents) == 0:
         game.status = "finished"
-
         for gp in players_in_game:
             p = Player.query.get(gp.player_id)
             p.games_played += 1
@@ -497,7 +506,6 @@ def fire(game_id):
                 p.wins += 1
             else:
                 p.losses += 1
-
         db.session.commit()
 
         return jsonify({
@@ -509,7 +517,6 @@ def fire(game_id):
 
     n = len(players_in_game)
     idx = game.current_turn_index
-
     for _ in range(n):
         idx = (idx + 1) % n
         pid = players_in_game[idx].player_id
@@ -523,7 +530,7 @@ def fire(game_id):
     return jsonify({
         "result": result,
         "next_player_id": players_in_game[idx].player_id,
-        "game_status": "active"
+        "game_status": "playing"
     }), 200
 
 
@@ -535,11 +542,11 @@ def fire(game_id):
 def get_moves(game_id):
     gid = parse_game_id(game_id)
     if gid is None:
-        return jsonify({"error": "game not found"}), 404
+        return jsonify({"error": "not_found"}), 404
 
     game = Game.query.get(gid)
     if not game:
-        return jsonify({"error": "game not found"}), 404
+        return jsonify({"error": "not_found"}), 404
 
     rows = Move.query.filter_by(game_id=gid).order_by(Move.id).all()
     payload = []
@@ -566,18 +573,16 @@ def test_restart(game_id):
 
     gid = parse_game_id(game_id)
     if gid is None:
-        return jsonify({"error": "not found"}), 404
+        return jsonify({"error": "forbidden"}), 403
 
     game = Game.query.get(gid)
     if not game:
-        return jsonify({"error": "not found"}), 404
+        return jsonify({"error": "not_found"}), 404
 
     Ship.query.filter_by(game_id=gid).delete()
     Move.query.filter_by(game_id=gid).delete()
-
     game.status = "waiting_setup"
     game.current_turn_index = 0
-
     db.session.commit()
 
     return jsonify({"status": "reset"}), 200
@@ -597,18 +602,18 @@ def test_place_ships(game_id):
         return jsonify({"error": "forbidden"}), 403
 
     data = request.get_json(silent=True)
-    if not data:
+    if not isinstance(data, dict):
         return jsonify({"error": "forbidden"}), 403
 
-    if "player_id" not in data or "ships" not in data:
-        return jsonify({"error": "bad_request"}), 400
+    player_id = parse_player_id(pick(data, "player_id", "playerId", "playerld"))
+    ship_list = pick(data, "ships")
 
-    player_id = parse_player_id(data["player_id"])
-    ship_list = data["ships"]
+    if player_id is None or ship_list is None:
+        return jsonify({"error": "bad_request"}), 400
 
     game = Game.query.get(gid)
     if not game:
-        return jsonify({"error": "game not found"}), 404
+        return jsonify({"error": "not_found"}), 404
 
     if Player.query.get(player_id) is None:
         return jsonify({"error": "invalid player"}), 403
@@ -616,24 +621,21 @@ def test_place_ships(game_id):
     if GamePlayer.query.filter_by(game_id=gid, player_id=player_id).first() is None:
         return jsonify({"error": "player not in game"}), 403
 
-    if game.status == "finished":
-        return jsonify({"error": "game finished"}), 409
-
     Ship.query.filter_by(game_id=gid, player_id=player_id).delete()
 
     seen = set()
     for s in ship_list:
-        row = s.get("row")
-        col = s.get("col")
+        row = pick(s, "row")
+        col = pick(s, "col")
 
         if not isinstance(row, int) or not isinstance(col, int):
-            return jsonify({"error": "invalid coordinates"}), 400
+            return jsonify({"error": "bad_request"}), 400
 
         if row < 0 or row >= game.grid_size or col < 0 or col >= game.grid_size:
-            return jsonify({"error": "out of bounds"}), 400
+            return jsonify({"error": "bad_request"}), 400
 
         if (row, col) in seen:
-            return jsonify({"error": "duplicate ship placement"}), 400
+            return jsonify({"error": "bad_request"}), 400
 
         seen.add((row, col))
 
@@ -647,13 +649,8 @@ def test_place_ships(game_id):
 
     db.session.commit()
 
-    placed = db.session.query(Ship.player_id) \
-        .filter_by(game_id=gid) \
-        .group_by(Ship.player_id) \
-        .count()
-
+    placed = db.session.query(Ship.player_id).filter_by(game_id=gid).group_by(Ship.player_id).count()
     total = GamePlayer.query.filter_by(game_id=gid).count()
-
     if placed == total:
         game.status = "active"
         db.session.commit()
@@ -662,7 +659,7 @@ def test_place_ships(game_id):
 
 
 # -------------------------
-# TEST BOARD REVEAL
+# TEST BOARD
 # -------------------------
 
 @app.route("/api/test/games/<game_id>/board/<player_id>", methods=["GET"])
@@ -672,13 +669,12 @@ def test_board(game_id, player_id):
 
     gid = parse_game_id(game_id)
     pid = parse_player_id(player_id)
-
     if gid is None or pid is None:
         return jsonify({"error": "forbidden"}), 403
 
     game = Game.query.get(gid)
     if not game:
-        return jsonify({"error": "game not found"}), 404
+        return jsonify({"error": "not_found"}), 404
 
     if Player.query.get(pid) is None:
         return jsonify({"error": "invalid player"}), 403
@@ -687,21 +683,32 @@ def test_board(game_id, player_id):
     moves_rows = Move.query.filter_by(game_id=gid).order_by(Move.id).all()
 
     ships_payload = sorted([[s.row, s.col] for s in ships_rows])
-    moves_payload = []
+
+    # build a simple board string form too
+    board = [["~" for _ in range(game.grid_size)] for _ in range(game.grid_size)]
+    for s in ships_rows:
+        board[s.row][s.col] = "O"
+
     for m in moves_rows:
-        moves_payload.append({
-            "player_id": m.player_id,
-            "row": m.row,
-            "col": m.col,
-            "result": m.result,
-            "timestamp": m.timestamp
-        })
+        if 0 <= m.row < game.grid_size and 0 <= m.col < game.grid_size:
+            board[m.row][m.col] = "X" if m.result == "hit" else "~"
+
+    board_rows = [" ".join(r) for r in board]
 
     return jsonify({
         "game_id": gid,
         "player_id": pid,
         "ships": ships_payload,
-        "moves": moves_payload
+        "board": board_rows,
+        "moves": [
+            {
+                "player_id": m.player_id,
+                "row": m.row,
+                "col": m.col,
+                "result": m.result,
+                "timestamp": m.timestamp
+            } for m in moves_rows
+        ]
     }), 200
 
 
