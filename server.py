@@ -312,6 +312,21 @@ def join_game(game_id):
         "player_id": player.id
     }), 200
 
+@app.route("/api/games", methods=["GET"])
+def list_games():
+    games = Game.query.all()
+    result = []
+    for g in games:
+        player_count = GamePlayer.query.filter_by(game_id=g.id).count()
+        result.append({
+            "game_id": g.id,
+            "grid_size": g.grid_size,
+            "status": g.status,
+            "max_players": g.max_players,
+            "player_count": player_count
+        })
+    return jsonify(result), 200
+
 
 # -------------------------
 # GET GAME
