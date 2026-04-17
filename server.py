@@ -4,6 +4,7 @@ from datetime import datetime
 import os
 import re
 from sqlalchemy import text
+from flask import Flask, request, jsonify, send_from_directory
 
 app = Flask(__name__)
 
@@ -113,6 +114,9 @@ def health():
         "api_version": "2.3"
     }), 200
 
+@app.route("/")
+def index():
+    return send_from_directory(".", "index.html")
 
 # -------------------------
 # RESET
