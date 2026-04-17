@@ -353,7 +353,8 @@ def get_game(game_id):
         "grid_size": game.grid_size,
         "status": game.status,
         "current_turn_index": game.current_turn_index,
-        "active_players": active_players
+        "active_players": active_players, 
+        "max_players": game.max_players
     }), 200
 
 @app.route("/api/games/<game_id>/players", methods=["GET"])
