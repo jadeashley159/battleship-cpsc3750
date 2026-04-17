@@ -132,8 +132,8 @@ select option{background:var(--surface)}
 
 /* GRID */
 .grid-scroll{overflow-x:auto;padding-bottom:4px}
-.grid{display:grid;border:1px solid var(--border)}
-.cell{border:1px solid rgba(24,48,72,.7);background:rgba(4,10,18,.85);display:flex;align-items:center;justify-content:center;transition:background .12s,border-color .12s;position:relative;cursor:default}
+.grid{display:grid;border:1px solid var(--border);background:rgba(0,30,60,.3)}
+.cell{border:1px solid rgba(0,150,200,.15);background:rgba(0,20,40,.9);display:flex;align-items:center;justify-content:center;transition:background .12s,border-color .12s;position:relative;cursor:default}
 .cell.ship{background:var(--ship-bg);border-color:rgba(0,232,122,.3)}
 .cell.ship::after{content:'';width:9px;height:9px;background:var(--green);border-radius:50%;box-shadow:0 0 6px var(--green)}
 .cell.selected{background:rgba(0,232,122,.22);border-color:var(--green)}
@@ -393,6 +393,7 @@ const S = {
   lobbyTimer: null,
   names: {},
   knownPlayers: [],   // player IDs confirmed in current game
+  orderedPlayers: [], // player IDs in turn_order from server
 };
 
 function api(path, opts={}) {
@@ -566,6 +567,7 @@ async function createGame() {
     S.gridSize = gs;
     S.maxPlayers = mp;
     S.knownPlayers = [S.playerId];
+    S.orderedPlayers = [];
     stopPoll();
     enterWaiting(S.gameId, gs, mp, 1);
   } catch(e) {
@@ -585,6 +587,7 @@ async function joinGame(gameId) {
     S.gridSize = g.grid_size || 10;
     S.maxPlayers = g.max_players || 2;
     S.knownPlayers = [S.playerId];
+    S.orderedPlayers = [];
     stopPoll();
     if (g.status === 'active') { enterGame(gameId); return; }
     enterWaiting(gameId, g.grid_size, g.max_players, g.active_players);
@@ -646,6 +649,7 @@ async function rejoinGame(gameId) {
     S.gridSize = g.grid_size || 10;
     S.maxPlayers = g.max_players || 2;
     S.knownPlayers = [S.playerId];
+    S.orderedPlayers = [];
     stopPoll();
     if (g.status === 'active') { enterGame(gameId); return; }
     enterWaiting(gameId, g.grid_size, g.max_players, g.active_players);
@@ -795,16 +799,23 @@ async function discoverPlayers(gameId, moves) {
   moves.forEach(m => {
     if (!S.knownPlayers.includes(m.player_id)) S.knownPlayers.push(m.player_id);
   });
-  // Try the players endpoint (may not exist — graceful fallback)
+  // Fetch ordered player list from /players endpoint
   try {
     const res = await api(`/api/games/${gameId}/players`);
     if (res.ok) {
       const data = await res.json();
-      const ids = Array.isArray(data) ? data.map(p => p.player_id || p.id || p) : [];
-      ids.forEach(id => {
-        if (id && !S.knownPlayers.includes(id)) S.knownPlayers.push(id);
-        if (id && !S.names[id]) S.names[id] = `Player ${id}`;
-      });
+      if (Array.isArray(data) && data.length) {
+        // Store ordered by turn_order — this is what server uses for current_turn_index
+        S.orderedPlayers = data
+          .sort((a, b) => (a.turn_order ?? 0) - (b.turn_order ?? 0))
+          .map(p => p.player_id || p.id || p);
+        data.forEach(p => {
+          const id = p.player_id || p.id || p;
+          if (id && !S.knownPlayers.includes(id)) S.knownPlayers.push(id);
+          if (id && p.username) S.names[id] = p.username;
+          else if (id && !S.names[id]) S.names[id] = `Player ${id}`;
+        });
+      }
     }
   } catch(e) {}
 }
@@ -844,12 +855,13 @@ async function renderGame(game, moves) {
     tt.textContent = `WAITING FOR ${(S.names[currentId] || 'OPPONENT').toUpperCase()}`;
   }
 
-  // My board
+  // My board — show my ships + shots that opponents fired at me
   document.getElementById('my-bname').textContent = (S.username || 'You').toUpperCase();
-  const myBoard = makeBoard(game.grid_size, S.myShips, moves, true);
+  const shotsAtMe = moves.filter(m => m.player_id !== S.playerId);
+  const myBoard = makeBoard(game.grid_size, S.myShips, shotsAtMe, true);
   renderGrid('my-grid', myBoard, game.grid_size, false, null);
 
-  // Enemy boards
+  // Enemy board — show only shots I fired
   const opponents = seen.filter(id => id !== S.playerId);
   if (!opponents.length) {
     document.getElementById('opp-bname').textContent = 'Waiting for opponent...';
@@ -947,11 +959,41 @@ function renderGrid(containerId, board, size, fireable, onFire) {
   const c = document.getElementById(containerId);
   if (!c) return;
   c.innerHTML = '';
+  const cs = cellSz(size);
+  const cols = String.fromCharCode;
+
+  // Wrapper with labels
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display:inline-block';
+
+  // Column labels (A B C ...)
+  const colRow = document.createElement('div');
+  colRow.style.cssText = `display:flex;margin-left:${cs+4}px;margin-bottom:2px`;
+  for (let c2=0; c2<size; c2++) {
+    const lbl = document.createElement('div');
+    lbl.style.cssText = `width:${cs}px;text-align:center;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);line-height:1`;
+    lbl.textContent = String.fromCharCode(65+c2);
+    colRow.appendChild(lbl);
+  }
+  wrap.appendChild(colRow);
+
+  const bodyRow = document.createElement('div');
+  bodyRow.style.cssText = 'display:flex';
+
+  // Row labels (1 2 3 ...)
+  const rowLabels = document.createElement('div');
+  rowLabels.style.cssText = `display:flex;flex-direction:column;margin-right:4px`;
+
   const g = document.createElement('div');
   g.className = 'grid';
-  const cs = cellSz(size);
   g.style.gridTemplateColumns = `repeat(${size},${cs}px)`;
+
   board.forEach((row, r) => {
+    const lbl = document.createElement('div');
+    lbl.style.cssText = `width:${cs}px;height:${cs}px;display:flex;align-items:center;justify-content:center;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim)`;
+    lbl.textContent = r+1;
+    rowLabels.appendChild(lbl);
+
     row.forEach((st, col) => {
       const cell = document.createElement('div');
       cell.className = 'cell ' + st;
@@ -963,11 +1005,21 @@ function renderGrid(containerId, board, size, fireable, onFire) {
       g.appendChild(cell);
     });
   });
-  c.appendChild(g);
+
+  bodyRow.appendChild(rowLabels);
+  bodyRow.appendChild(g);
+  wrap.appendChild(bodyRow);
+  c.appendChild(wrap);
 }
 
 function getNextPlayer(game, moves, playerOrder) {
   if (!playerOrder.length) return null;
+  // Trust server's current_turn_index if we have an ordered player list
+  if (S.orderedPlayers && S.orderedPlayers.length) {
+    const idx = game.current_turn_index % S.orderedPlayers.length;
+    return S.orderedPlayers[idx];
+  }
+  // Fallback: derive from last mover
   if (!moves.length) return playerOrder[0];
   const lastMover = moves[moves.length - 1].player_id;
   const lastIdx = playerOrder.indexOf(lastMover);
