@@ -564,6 +564,7 @@ async function createGame() {
     if (!res.ok) { msg('create-msg', `⚠ ${d.error || 'Failed to create game.'}`, 'err'); return; }
     S.gameId = d.game_id || d.id;
     S.gridSize = gs;
+    S.maxPlayers = mp;
     S.knownPlayers = [S.playerId];
     stopPoll();
     enterWaiting(S.gameId, gs, mp, 1);
@@ -582,6 +583,7 @@ async function joinGame(gameId) {
     const g = await gRes.json();
     S.gameId = gameId;
     S.gridSize = g.grid_size || 10;
+    S.maxPlayers = g.max_players || 2;
     S.knownPlayers = [S.playerId];
     stopPoll();
     if (g.status === 'active') { enterGame(gameId); return; }
@@ -624,7 +626,8 @@ async function pollWaiting(gameId) {
     const g = await res.json();
     updateWaitInfo(gameId, g.grid_size, g.max_players || '?', g.active_players || '?');
     // Only show "Place Ships" once all players have joined
-    const full = (g.active_players >= g.max_players);
+    const mp = g.max_players || S.maxPlayers || 2;
+    const full = g.active_players >= mp;
     document.getElementById('btn-go-place').style.display = full ? 'inline-flex' : 'none';
     if (full) {
       document.getElementById('waiting-msg').className = 'msg ok';
@@ -641,6 +644,7 @@ async function rejoinGame(gameId) {
     const g = await gRes.json();
     S.gameId = gameId;
     S.gridSize = g.grid_size || 10;
+    S.maxPlayers = g.max_players || 2;
     S.knownPlayers = [S.playerId];
     stopPoll();
     if (g.status === 'active') { enterGame(gameId); return; }
