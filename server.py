@@ -356,6 +356,25 @@ def get_game(game_id):
         "active_players": active_players
     }), 200
 
+@app.route("/api/games/<game_id>/players", methods=["GET"])
+def get_game_players(game_id):
+    gid = parse_game_id(game_id)
+    if gid is None:
+        return jsonify({"error": "not_found"}), 404
+    game = Game.query.get(gid)
+    if not game:
+        return jsonify({"error": "not_found"}), 404
+    gps = GamePlayer.query.filter_by(game_id=gid).order_by(GamePlayer.turn_order).all()
+    result = []
+    for gp in gps:
+        p = Player.query.get(gp.player_id)
+        result.append({
+            "player_id": gp.player_id,
+            "username": p.username if p else f"Player {gp.player_id}",
+            "turn_order": gp.turn_order
+        })
+    return jsonify(result), 200
+
 
 # -------------------------
 # PLACE SHIPS
