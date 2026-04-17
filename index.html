@@ -134,18 +134,19 @@ select option{background:var(--surface)}
 .grid-scroll{overflow-x:auto;padding-bottom:4px}
 .grid{display:grid;border:1px solid var(--border);background:rgba(0,30,60,.3)}
 .cell{border:1px solid rgba(0,150,200,.15);background:rgba(0,20,40,.9);display:flex;align-items:center;justify-content:center;transition:background .12s,border-color .12s;position:relative;cursor:default}
-.cell.ship{background:var(--ship-bg);border-color:rgba(0,232,122,.3)}
-.cell.ship::after{content:'';width:9px;height:9px;background:var(--green);border-radius:50%;box-shadow:0 0 6px var(--green)}
-.cell.selected{background:rgba(0,232,122,.22);border-color:var(--green)}
-.cell.selected::after{content:'';width:11px;height:11px;background:var(--green);border-radius:50%;box-shadow:0 0 10px var(--green);animation:sp 1s infinite}
-@keyframes sp{0%,100%{transform:scale(1)}50%{transform:scale(1.3)}}
-.cell.hit{background:var(--hit-bg);border-color:rgba(255,58,58,.5);animation:hitf .35s ease-out}
-.cell.hit::after{content:'✕';color:var(--red);font-size:16px;font-weight:bold;line-height:1;text-shadow:var(--glow-red)}
-.cell.miss{background:var(--miss-bg);border-color:rgba(24,48,72,.5)}
-.cell.miss::after{content:'·';color:#2a5a7a;font-size:20px;line-height:1}
-.cell.placing:hover{background:rgba(0,232,122,.12);border-color:rgba(0,232,122,.3);cursor:crosshair}
-.cell.fireable:hover{background:rgba(255,58,58,.1);border-color:rgba(255,58,58,.4);cursor:crosshair}
-@keyframes hitf{0%{background:rgba(255,58,58,.55)}100%{background:var(--hit-bg)}}
+.cell.ship{background:rgba(0,232,122,.1);border-color:rgba(0,232,122,.4)}
+.cell.ship::after{content:'';width:7px;height:7px;background:var(--green);border-radius:50%;box-shadow:0 0 5px var(--green);opacity:.85}
+.cell.selected{background:rgba(0,232,122,.18);border-color:rgba(0,232,122,.7)}
+.cell.selected::after{content:'';width:8px;height:8px;background:var(--green);border-radius:50%;box-shadow:0 0 8px var(--green);animation:sp 1s infinite}
+@keyframes sp{0%,100%{transform:scale(1)}50%{transform:scale(1.25)}}
+.cell.hit{background:rgba(220,50,50,.25);border-color:rgba(220,50,50,.6);animation:hitf .3s ease-out}
+.cell.hit::after{content:'';width:10px;height:10px;background:var(--red);border-radius:50%;box-shadow:0 0 8px var(--red);opacity:.9}
+.cell.miss{background:rgba(0,80,140,.2);border-color:rgba(0,100,160,.3)}
+.cell.miss::after{content:'';width:4px;height:4px;background:#2a6a9a;border-radius:50%;opacity:.7}
+.cell.placing:hover{background:rgba(0,232,122,.1);border-color:rgba(0,232,122,.4);cursor:crosshair}
+.cell.fireable{cursor:crosshair}
+.cell.fireable:hover{background:rgba(220,50,50,.12);border-color:rgba(220,50,50,.5)}
+@keyframes hitf{0%{background:rgba(220,50,50,.5)}100%{background:rgba(220,50,50,.25)}}
 
 /* GAME */
 #screen-game{padding:20px 28px;max-width:1240px;margin:0 auto}
@@ -157,7 +158,7 @@ select option{background:var(--surface)}
 @keyframes tp{0%,100%{box-shadow:none}50%{box-shadow:0 0 14px rgba(0,232,122,.3)}}
 .game-layout{display:grid;grid-template-columns:1fr 260px;gap:20px}
 .boards-row{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:16px}
-.board-card{background:var(--surface);border:1px solid var(--border);padding:16px}
+.board-card{background:var(--surface);border:1px solid var(--border);padding:16px 16px 20px}
 .board-lbl{font-family:'Orbitron',monospace;font-size:9px;letter-spacing:3px;color:var(--dim);margin-bottom:4px}
 .board-name{font-family:'Orbitron',monospace;font-size:13px;color:var(--text);margin-bottom:14px}
 .extra-boards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
@@ -394,6 +395,7 @@ const S = {
   names: {},
   knownPlayers: [],   // player IDs confirmed in current game
   orderedPlayers: [], // player IDs in turn_order from server
+  firing: false,      // lock to prevent double-fire
 };
 
 function api(path, opts={}) {
@@ -1029,6 +1031,14 @@ function getNextPlayer(game, moves, playerOrder) {
 
 // ── FIRE ─────────────────────────────────────────────────
 async function fire(row, col) {
+  if (S.firing) return; // prevent double-click
+  S.firing = true;
+
+  // Optimistic UI — immediately mark the cell as pending
+  const tt = document.getElementById('turn-txt');
+  const prevTxt = tt.textContent;
+  tt.textContent = 'FIRING...';
+
   try {
     const res = await api(`/api/games/${S.gameId}/fire`, {
       method: 'POST',
@@ -1040,12 +1050,14 @@ async function fire(row, col) {
     } else if (res.status === 403) {
       turnError("It's not your turn yet!");
     } else if (res.status === 409) {
-      turnError('You already fired at that cell!');
+      turnError('Already fired there — pick another cell.');
     } else {
       turnError(d.error || 'Fire failed.');
     }
   } catch(e) {
     turnError('Server unreachable.');
+  } finally {
+    S.firing = false;
   }
 }
 
