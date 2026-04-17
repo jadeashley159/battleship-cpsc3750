@@ -223,7 +223,7 @@ select option{background:var(--surface)}
       </div>
       <div class="field">
         <label>Commander Name</label>
-        <input type="text" id="reg-name" placeholder="e.g. jade_ashley" maxlength="30"
+        <input type="text" id="reg-name" placeholder="e.g. commander99" maxlength="30"
                onkeydown="if(event.key==='Enter')register()">
       </div>
       <div id="reg-msg" class="msg"></div>
@@ -392,6 +392,7 @@ const S = {
   pollTimer: null,
   lobbyTimer: null,
   names: {},
+  knownPlayers: [],   // player IDs confirmed in current game
 };
 
 function api(path, opts={}) {
@@ -561,6 +562,7 @@ async function createGame() {
     if (!res.ok) { msg('create-msg', `⚠ ${d.error || 'Failed to create game.'}`, 'err'); return; }
     S.gameId = d.game_id || d.id;
     S.gridSize = gs;
+    S.knownPlayers = [S.playerId];
     stopPoll();
     enterWaiting(S.gameId, gs, mp, 1);
   } catch(e) {
@@ -578,6 +580,7 @@ async function joinGame(gameId) {
     const g = await gRes.json();
     S.gameId = gameId;
     S.gridSize = g.grid_size || 10;
+    S.knownPlayers = [S.playerId];
     stopPoll();
     if (g.status === 'active') { enterGame(gameId); return; }
     enterWaiting(gameId, g.grid_size, g.max_players, g.active_players);
@@ -748,17 +751,51 @@ async function refreshGame() {
       api(`/api/games/${S.gameId}/moves`)
     ]);
     const game = await gr.json();
-    const moves = Array.isArray(await mr.clone().json()) ? await mr.json() : [];
+    const movesRaw = await mr.json();
+    const moves = Array.isArray(movesRaw) ? movesRaw : [];
     S.gridSize = game.grid_size;
+
+    // Try to discover all players in this game
+    await discoverPlayers(S.gameId, moves);
+
     await renderGame(game, moves);
     if (game.status === 'finished') { stopPoll(); showWin(moves); }
   } catch(e) {}
 }
 
+async function discoverPlayers(gameId, moves) {
+  // Merge from moves first
+  moves.forEach(m => {
+    if (!S.knownPlayers.includes(m.player_id)) S.knownPlayers.push(m.player_id);
+  });
+  // Try the players endpoint (may not exist — graceful fallback)
+  try {
+    const res = await api(`/api/games/${gameId}/players`);
+    if (res.ok) {
+      const data = await res.json();
+      const ids = Array.isArray(data) ? data.map(p => p.player_id || p.id || p) : [];
+      ids.forEach(id => {
+        if (id && !S.knownPlayers.includes(id)) S.knownPlayers.push(id);
+        if (id && !S.names[id]) S.names[id] = `Player ${id}`;
+      });
+    }
+  } catch(e) {}
+}
+
 async function renderGame(game, moves) {
-  // Build player list from moves + self
-  const seen = [...new Set(moves.map(m => m.player_id))];
-  if (!seen.includes(S.playerId)) seen.unshift(S.playerId);
+  // Build player list: merge known players + anyone seen in moves
+  const fromMoves = moves.map(m => m.player_id);
+  const merged = [...new Set([...S.knownPlayers, ...fromMoves])];
+  // Make sure self is always first
+  if (!merged.includes(S.playerId)) merged.unshift(S.playerId);
+  // Update knownPlayers with anyone new we discover
+  merged.forEach(id => { if (!S.knownPlayers.includes(id)) S.knownPlayers.push(id); });
+
+  // Try to discover opponents by fetching game player list from lobby endpoint
+  // Since we have no /players endpoint per game, use active_players count as hint
+  // and trust knownPlayers accumulated over time
+  const seen = merged;
+
   for (const id of seen) {
     if (!S.names[id]) S.names[id] = `Player ${id}`;
   }
@@ -973,7 +1010,7 @@ function backToLobby() {
   enterLobby();
 }
 
-// ── AUTO-RESTORE ─────────────────────────────────────────
+// ── AUTO-RESTORE ─────────|────────────────────────────────
 window.addEventListener('load', () => {
   const pid = localStorage.getItem('bs_pid');
   const pname = localStorage.getItem('bs_name');
