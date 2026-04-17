@@ -299,7 +299,7 @@ select option{background:var(--surface)}
   <div class="wait-info" id="wait-info"></div>
   <div id="waiting-msg" class="msg"></div>
   <div class="mt20" style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
-    <button class="btn btn-green-ghost" id="btn-go-place" onclick="goToPlace()">PLACE MY SHIPS →</button>
+    <button class="btn btn-green-ghost" id="btn-go-place" onclick="goToPlace()" style="display:none">PLACE MY SHIPS →</button>
     <button class="btn btn-red-ghost btn-sm" onclick="backToLobby()">LEAVE GAME</button>
   </div>
 </div>
@@ -510,9 +510,10 @@ function renderLobby(games) {
     const id = g.game_id || g.id;
     const pc = g.player_count ?? g.active_players ?? '?';
     const max = g.max_players ?? '?';
-    const isOpen = g.status === 'waiting_setup' && pc < max;
+    const isOpen = g.status === 'waiting_setup';
+    const isFull = pc >= max;
     const stCls = g.status === 'waiting_setup' ? 'open' : g.status === 'active' ? 'active' : 'done';
-    const stLbl = g.status === 'waiting_setup' ? 'OPEN' : g.status === 'active' ? 'IN PROGRESS' : 'FINISHED';
+    const stLbl = g.status === 'waiting_setup' ? (isFull ? 'PLACING SHIPS' : 'OPEN') : g.status === 'active' ? 'IN PROGRESS' : 'FINISHED';
     const row = document.createElement('div');
     row.className = `game-card ${isOpen ? 'open' : ''}`;
     row.innerHTML = `
@@ -523,8 +524,9 @@ function renderLobby(games) {
       </div>
       <span class="badge ${stCls}">${stLbl}</span>
       <div style="display:flex;gap:6px">
-        ${isOpen ? `<button class="btn btn-green-ghost btn-sm" onclick="joinGame(${id})">JOIN</button>` : ''}
-        ${g.status !== 'waiting_setup' ? `<button class="btn btn-ghost btn-sm" onclick="viewGame(${id},${g.grid_size||10})">VIEW</button>` : ''}
+        ${isOpen && !isFull ? `<button class="btn btn-green-ghost btn-sm" onclick="joinGame(${id})">JOIN</button>` : ''}
+        ${isOpen && isFull ? `<button class="btn btn-ghost btn-sm" onclick="rejoinGame(${id})">REJOIN</button>` : ''}
+        ${g.status === 'active' || g.status === 'finished' ? `<button class="btn btn-ghost btn-sm" onclick="viewGame(${id},${g.grid_size||10})">VIEW</button>` : ''}
       </div>
     `;
     c.appendChild(row);
@@ -621,8 +623,29 @@ async function pollWaiting(gameId) {
     const res = await api(`/api/games/${gameId}`);
     const g = await res.json();
     updateWaitInfo(gameId, g.grid_size, g.max_players || '?', g.active_players || '?');
+    // Only show "Place Ships" once all players have joined
+    const full = (g.active_players >= g.max_players);
+    document.getElementById('btn-go-place').style.display = full ? 'inline-flex' : 'none';
+    if (full) {
+      document.getElementById('waiting-msg').className = 'msg ok';
+      document.getElementById('waiting-msg').textContent = '✓ All players joined! Click Place My Ships to continue.';
+    }
     if (g.status === 'active') { stopPoll(); enterGame(gameId); }
   } catch(e) {}
+}
+
+async function rejoinGame(gameId) {
+  // Player is already in this game, just go back to it
+  try {
+    const gRes = await api(`/api/games/${gameId}`);
+    const g = await gRes.json();
+    S.gameId = gameId;
+    S.gridSize = g.grid_size || 10;
+    S.knownPlayers = [S.playerId];
+    stopPoll();
+    if (g.status === 'active') { enterGame(gameId); return; }
+    enterWaiting(gameId, g.grid_size, g.max_players, g.active_players);
+  } catch(e) { alert('Server unreachable.'); }
 }
 
 function goToPlace() {
@@ -1010,7 +1033,7 @@ function backToLobby() {
   enterLobby();
 }
 
-// ── AUTO-RESTORE ─────────|────────────────────────────────
+// ── AUTO-RESTORE ─────────────────────────────────────────
 window.addEventListener('load', () => {
   const pid = localStorage.getItem('bs_pid');
   const pname = localStorage.getItem('bs_name');
