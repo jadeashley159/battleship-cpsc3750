@@ -1,10 +1,9 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import os
 import re
 from sqlalchemy import text
-from flask import Flask, request, jsonify, send_from_directory
 
 app = Flask(__name__)
 
@@ -63,7 +62,6 @@ def parse_player_id(raw):
 class Player(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
-
     games_played = db.Column(db.Integer, default=0)
     wins = db.Column(db.Integer, default=0)
     losses = db.Column(db.Integer, default=0)
@@ -114,9 +112,15 @@ def health():
         "api_version": "2.3"
     }), 200
 
+
+# -------------------------
+# SERVE FRONTEND
+# -------------------------
+
 @app.route("/")
 def index():
     return send_from_directory(".", "index.html")
+
 
 # -------------------------
 # RESET
@@ -152,22 +156,13 @@ def create_player():
     username = pick(data, "username", "playerName", "displayName")
 
     if username is None:
-        return jsonify({
-            "error": True,
-            "message": "bad_request"
-        }), 400
+        return jsonify({"error": "bad_request"}), 400
 
     if not isinstance(username, str) or not username.strip():
-        return jsonify({
-            "error": True,
-            "message": "bad_request"
-        }), 400
+        return jsonify({"error": "bad_request"}), 400
 
     if not USERNAME_RE.fullmatch(username):
-        return jsonify({
-            "error": True,
-            "message": "bad_request"
-        }), 400
+        return jsonify({"error": "bad_request"}), 400
 
     existing = Player.query.filter_by(username=username).first()
     if existing:
@@ -269,52 +264,8 @@ def create_game():
 
 
 # -------------------------
-# JOIN GAME
+# LIST GAMES
 # -------------------------
-
-@app.route("/api/games/<game_id>/join", methods=["POST"])
-def join_game(game_id):
-    gid = parse_game_id(game_id)
-    if gid is None:
-        return jsonify({"error": "not_found"}), 404
-
-    data = request.get_json(silent=True)
-    player_id = parse_player_id(pick(data, "player_id", "playerId", "playerld"))
-
-    if player_id is None:
-        return jsonify({"error": "bad_request"}), 400
-
-    game = Game.query.get(gid)
-    if not game:
-        return jsonify({"error": "not_found"}), 404
-
-    player = Player.query.get(player_id)
-    if not player:
-        return jsonify({"error": "player does not exist"}), 404
-
-    existing_gp = GamePlayer.query.filter_by(game_id=gid, player_id=player.id).first()
-    if existing_gp:
-        return jsonify({"error": "conflict"}), 409
-
-    count = GamePlayer.query.filter_by(game_id=gid).count()
-    if count >= game.max_players:
-        return jsonify({"error": "game full"}), 409
-
-    if game.status != "waiting_setup":
-        return jsonify({"error": "game already started"}), 409
-
-    db.session.add(GamePlayer(
-        game_id=gid,
-        player_id=player.id,
-        turn_order=count
-    ))
-    db.session.commit()
-
-    return jsonify({
-        "status": "joined",
-        "game_id": gid,
-        "player_id": player.id
-    }), 200
 
 @app.route("/api/games", methods=["GET"])
 def list_games():
@@ -330,6 +281,57 @@ def list_games():
             "player_count": player_count
         })
     return jsonify(result), 200
+
+
+# -------------------------
+# JOIN GAME
+# -------------------------
+
+@app.route("/api/games/<game_id>/join", methods=["POST"])
+def join_game(game_id):
+    gid = parse_game_id(game_id)
+    if gid is None:
+        return jsonify({"error": "not_found"}), 404
+
+    data = request.get_json(silent=True)
+    player_id = parse_player_id(pick(data, "player_id", "playerId", "playerld"))
+
+    if player_id is None:
+        return jsonify({"error": "bad_request"}), 400
+
+    # Check game exists BEFORE checking player conflicts
+    game = Game.query.get(gid)
+    if not game:
+        return jsonify({"error": "not_found"}), 404
+
+    player = Player.query.get(player_id)
+    if not player:
+        return jsonify({"error": "not_found"}), 404
+
+    if game.status != "waiting_setup":
+        return jsonify({"error": "game already started"}), 409
+
+    existing_gp = GamePlayer.query.filter_by(game_id=gid, player_id=player.id).first()
+    if existing_gp:
+        return jsonify({"error": "conflict"}), 409
+
+    count = GamePlayer.query.filter_by(game_id=gid).count()
+    if count >= game.max_players:
+        # FIX: return 400 not 409 for full game
+        return jsonify({"error": "game full"}), 400
+
+    db.session.add(GamePlayer(
+        game_id=gid,
+        player_id=player.id,
+        turn_order=count
+    ))
+    db.session.commit()
+
+    return jsonify({
+        "status": "joined",
+        "game_id": gid,
+        "player_id": player.id
+    }), 200
 
 
 # -------------------------
@@ -353,18 +355,25 @@ def get_game(game_id):
         "grid_size": game.grid_size,
         "status": game.status,
         "current_turn_index": game.current_turn_index,
-        "active_players": active_players, 
+        "active_players": active_players,
         "max_players": game.max_players
     }), 200
+
+
+# -------------------------
+# GET GAME PLAYERS
+# -------------------------
 
 @app.route("/api/games/<game_id>/players", methods=["GET"])
 def get_game_players(game_id):
     gid = parse_game_id(game_id)
     if gid is None:
         return jsonify({"error": "not_found"}), 404
+
     game = Game.query.get(gid)
     if not game:
         return jsonify({"error": "not_found"}), 404
+
     gps = GamePlayer.query.filter_by(game_id=gid).order_by(GamePlayer.turn_order).all()
     result = []
     for gp in gps:
@@ -409,7 +418,7 @@ def place_ships(game_id):
         return jsonify({"error": "conflict"}), 409
 
     if not isinstance(ship_list, list) or len(ship_list) != 3:
-        return jsonify({"error": "3"}), 400
+        return jsonify({"error": "bad_request"}), 400
 
     seen = set()
     for s in ship_list:
@@ -448,9 +457,7 @@ def place_ships(game_id):
         game.status = "active"
         db.session.commit()
 
-    return jsonify({
-        "status": "placed"
-    }), 200
+    return jsonify({"status": "placed"}), 200
 
 
 # -------------------------
@@ -486,7 +493,7 @@ def fire(game_id):
         return jsonify({"error": "player not in game"}), 403
 
     if game.status == "finished":
-        return jsonify({"error": "game finished"}), 409
+        return jsonify({"error": "game finished"}), 400
 
     if game.status != "active":
         return jsonify({"error": "bad_request"}), 400
@@ -620,6 +627,7 @@ def test_restart(game_id):
 
     Ship.query.filter_by(game_id=gid).delete()
     Move.query.filter_by(game_id=gid).delete()
+    GamePlayer.query.filter_by(game_id=gid).delete()  # FIXED: clear players so tests can re-join
     game.status = "waiting_setup"
     game.current_turn_index = 0
     db.session.commit()
@@ -723,7 +731,6 @@ def test_board(game_id, player_id):
 
     ships_payload = sorted([[s.row, s.col] for s in ships_rows])
 
-    # build a simple board string form too
     board = [["~" for _ in range(game.grid_size)] for _ in range(game.grid_size)]
     for s in ships_rows:
         board[s.row][s.col] = "O"
