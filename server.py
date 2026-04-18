@@ -17,7 +17,8 @@ USERNAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
 def check_test_auth():
-    return request.headers.get("X-Test-Password") == TEST_PASSWORD
+    auth = request.headers.get("X-Test-Password", "")
+    return auth == TEST_PASSWORD
 
 
 def pick(data, *keys):
@@ -37,8 +38,6 @@ def parse_game_id(raw):
     s = str(raw).strip()
     if s.isdigit():
         return int(s)
-    if s in {":id", "{id}", "<id>"}:
-        return 1
     return None
 
 
@@ -50,8 +49,6 @@ def parse_player_id(raw):
     s = str(raw).strip()
     if s.isdigit():
         return int(s)
-    if s in {":player_id", "{player_id}", "<player_id>"}:
-        return 1
     return None
 
 
@@ -299,25 +296,28 @@ def join_game(game_id):
     if player_id is None:
         return jsonify({"error": "bad_request"}), 400
 
-    # Check game exists BEFORE checking player conflicts
+    # Game must exist first
     game = Game.query.get(gid)
     if not game:
         return jsonify({"error": "not_found"}), 404
 
+    # Player must exist
     player = Player.query.get(player_id)
     if not player:
         return jsonify({"error": "not_found"}), 404
 
+    # Game must still be open
     if game.status != "waiting_setup":
         return jsonify({"error": "game already started"}), 409
 
+    # Player already in this game
     existing_gp = GamePlayer.query.filter_by(game_id=gid, player_id=player.id).first()
     if existing_gp:
         return jsonify({"error": "conflict"}), 409
 
+    # Game full — 400
     count = GamePlayer.query.filter_by(game_id=gid).count()
     if count >= game.max_players:
-        # FIX: return 400 not 409 for full game
         return jsonify({"error": "game full"}), 400
 
     db.session.add(GamePlayer(
@@ -432,7 +432,8 @@ def place_ships(game_id):
             return jsonify({"error": "bad_request"}), 400
 
         if (row, col) in seen:
-            return jsonify({"error": "bad_request"}), 400
+            # Duplicate positions — 409
+            return jsonify({"error": "conflict"}), 409
 
         seen.add((row, col))
 
@@ -492,9 +493,11 @@ def fire(game_id):
     if GamePlayer.query.filter_by(game_id=gid, player_id=player_id).first() is None:
         return jsonify({"error": "player not in game"}), 403
 
+    # Finished — 400
     if game.status == "finished":
         return jsonify({"error": "game finished"}), 400
 
+    # Not active — 400
     if game.status != "active":
         return jsonify({"error": "bad_request"}), 400
 
@@ -504,15 +507,16 @@ def fire(game_id):
     if row < 0 or row >= game.grid_size or col < 0 or col >= game.grid_size:
         return jsonify({"error": "bad_request"}), 400
 
+    # Check whose turn it is BEFORE checking duplicate
+    players_in_game = GamePlayer.query.filter_by(game_id=gid).order_by(GamePlayer.turn_order).all()
+    current = players_in_game[game.current_turn_index].player_id
+    if current != player_id:
+        return jsonify({"error": "forbidden"}), 403
+
+    # Duplicate shot — 409
     existing_move = Move.query.filter_by(game_id=gid, row=row, col=col).first()
     if existing_move:
         return jsonify({"error": "conflict"}), 409
-
-    players_in_game = GamePlayer.query.filter_by(game_id=gid).order_by(GamePlayer.turn_order).all()
-    current = players_in_game[game.current_turn_index].player_id
-
-    if current != player_id:
-        return jsonify({"error": "forbidden"}), 403
 
     hit_ship = Ship.query.filter_by(game_id=gid, row=row, col=col).first()
     result = "hit" if hit_ship else "miss"
@@ -576,7 +580,7 @@ def fire(game_id):
     return jsonify({
         "result": result,
         "next_player_id": players_in_game[idx].player_id,
-        "game_status": "playing"
+        "game_status": "active"
     }), 200
 
 
@@ -598,6 +602,7 @@ def get_moves(game_id):
     payload = []
     for m in rows:
         payload.append({
+            "game_id": gid,
             "player_id": m.player_id,
             "row": m.row,
             "col": m.col,
@@ -627,7 +632,7 @@ def test_restart(game_id):
 
     Ship.query.filter_by(game_id=gid).delete()
     Move.query.filter_by(game_id=gid).delete()
-    GamePlayer.query.filter_by(game_id=gid).delete()  # FIXED: clear players so tests can re-join
+    GamePlayer.query.filter_by(game_id=gid).delete()
     game.status = "waiting_setup"
     game.current_turn_index = 0
     db.session.commit()
