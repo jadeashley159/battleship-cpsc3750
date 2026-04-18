@@ -17,9 +17,7 @@ USERNAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
 def check_test_auth():
-    for key in request.headers:
-        if key[0].lower() == "x-test-password":
-            return key[1] == TEST_PASSWORD
+    return request.headers.get("X-Test-Password") == TEST_PASSWORD
     return False
 
 
@@ -38,7 +36,7 @@ def parse_game_id(raw):
     if raw is None:
         return None
     s = str(raw).strip()
-    if s.isdigit():
+    if s.isdigit() and int(s) > 0:
         return int(s)
     return None
 
@@ -49,7 +47,7 @@ def parse_player_id(raw):
     if raw is None:
         return None
     s = str(raw).strip()
-    if s.isdigit():
+    if s.isdigit() and int(s) > 0:
         return int(s)
     return None
 
@@ -163,7 +161,9 @@ def create_player():
     if not USERNAME_RE.fullmatch(username):
         return jsonify({"error": "bad_request"}), 400
 
-    existing = Player.query.filter_by(username=username).first()
+    existing = Player.query.filter(
+        db.func.lower(Player.username) == username.lower()
+    ).first()
     if existing:
         return jsonify({
             "player_id": existing.id,
@@ -308,19 +308,16 @@ def join_game(game_id):
     if not player:
         return jsonify({"error": "not_found"}), 404
 
-    # Game must still be open
-    if game.status != "waiting_setup":
-        return jsonify({"error": "game already started"}), 409
-
-    # Player already in this game
-    existing_gp = GamePlayer.query.filter_by(game_id=gid, player_id=player.id).first()
-    if existing_gp:
-        return jsonify({"error": "conflict"}), 409
-
-    # Game full — 400
     count = GamePlayer.query.filter_by(game_id=gid).count()
     if count >= game.max_players:
         return jsonify({"error": "game full"}), 400
+    
+    existing_gp = GamePlayer.query.filter_by(game_id=gid, player_id=player.id).first()
+    if existing_gp:
+        return jsonify({"error": "conflict"}), 409
+    
+    if game.status != "waiting_setup":
+        return jsonify({"error": "game already started"}), 409
 
     db.session.add(GamePlayer(
         game_id=gid,
@@ -402,6 +399,9 @@ def place_ships(game_id):
     player_id = parse_player_id(pick(data, "player_id", "playerId", "playerld"))
     ship_list = pick(data, "ships")
 
+    if Ship.query.filter_by(game_id=gid, player_id=player_id).first():
+        return jsonify({"error": "conflict"}), 409
+
     if player_id is None or ship_list is None:
         return jsonify({"error": "bad_request"}), 400
 
@@ -415,9 +415,6 @@ def place_ships(game_id):
 
     if GamePlayer.query.filter_by(game_id=gid, player_id=player_id).first() is None:
         return jsonify({"error": "player not in game"}), 403
-
-    if Ship.query.filter_by(game_id=gid, player_id=player_id).first():
-        return jsonify({"error": "conflict"}), 409
 
     if not isinstance(ship_list, list) or len(ship_list) != 3:
         return jsonify({"error": "bad_request"}), 400
@@ -434,7 +431,7 @@ def place_ships(game_id):
             return jsonify({"error": "bad_request"}), 400
 
         if (row, col) in seen:
-            return jsonify({"error": "conflict"}), 409
+            return jsonify({"error": "bad_request"}), 400
 
         seen.add((row, col))
 
@@ -581,7 +578,7 @@ def fire(game_id):
     return jsonify({
         "result": result,
         "next_player_id": players_in_game[idx].player_id,
-        "game_status": "active"
+        "game_status": "playing"
     }), 200
 
 
