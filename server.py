@@ -17,8 +17,10 @@ USERNAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
 def check_test_auth():
-    auth = request.headers.get("X-Test-Password") or request.headers.get("x-test-password", "")
-    return auth == TEST_PASSWORD
+    for key in request.headers:
+        if key[0].lower() == "x-test-password":
+            return key[1] == TEST_PASSWORD
+    return False
 
 
 def pick(data, *keys):
@@ -432,7 +434,7 @@ def place_ships(game_id):
             return jsonify({"error": "bad_request"}), 400
 
         if (row, col) in seen:
-            return jsonify({"error": "bad_request"}), 400
+            return jsonify({"error": "conflict"}), 409
 
         seen.add((row, col))
 
