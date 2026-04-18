@@ -17,7 +17,7 @@ USERNAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
 def check_test_auth():
-    auth = request.headers.get("X-Test-Password", "")
+    auth = request.headers.get("X-Test-Password") or request.headers.get("x-test-password", "")
     return auth == TEST_PASSWORD
 
 
@@ -432,8 +432,7 @@ def place_ships(game_id):
             return jsonify({"error": "bad_request"}), 400
 
         if (row, col) in seen:
-            # Duplicate positions — 409
-            return jsonify({"error": "conflict"}), 409
+            return jsonify({"error": "bad_request"}), 400
 
         seen.add((row, col))
 
@@ -507,16 +506,16 @@ def fire(game_id):
     if row < 0 or row >= game.grid_size or col < 0 or col >= game.grid_size:
         return jsonify({"error": "bad_request"}), 400
 
-    # Check whose turn it is BEFORE checking duplicate
+    # Duplicate shot — 409 (must check before turn so both players get right error)
+    existing_move = Move.query.filter_by(game_id=gid, row=row, col=col).first()
+    if existing_move:
+        return jsonify({"error": "conflict"}), 409
+
+    # Check whose turn it is
     players_in_game = GamePlayer.query.filter_by(game_id=gid).order_by(GamePlayer.turn_order).all()
     current = players_in_game[game.current_turn_index].player_id
     if current != player_id:
         return jsonify({"error": "forbidden"}), 403
-
-    # Duplicate shot — 409
-    existing_move = Move.query.filter_by(game_id=gid, row=row, col=col).first()
-    if existing_move:
-        return jsonify({"error": "conflict"}), 409
 
     hit_ship = Ship.query.filter_by(game_id=gid, row=row, col=col).first()
     result = "hit" if hit_ship else "miss"
