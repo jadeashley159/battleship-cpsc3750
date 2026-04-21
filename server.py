@@ -515,12 +515,17 @@ def fire(game_id):
     current = players_in_game[game.current_turn_index].player_id
     if current != player_id:
         return jsonify({"error": "forbidden"}), 403
-
-    hit_ship = Ship.query.filter_by(game_id=gid, row=row, col=col).first()
-    result = "hit" if hit_ship else "miss"
-
-    if hit_ship:
-        db.session.delete(hit_ship)
+    
+    opponent_ships = Ship.query.filter(
+        Ship.game_id == gid,
+        Ship.player_id != player_id,
+        Ship.row == row,
+        Ship.col == col
+    ).all()
+    
+    result = "hit" if opponent_ships else "miss"
+    for ship in opponent_ships:
+        db.session.delete(ship)
 
     db.session.add(Move(
         game_id=gid,
