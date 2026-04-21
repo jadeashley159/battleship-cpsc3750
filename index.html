@@ -135,14 +135,14 @@ select option{background:var(--surface)}
 .grid{display:grid;border:1px solid var(--border);background:rgba(0,30,60,.3)}
 .cell{border:1px solid rgba(0,150,200,.15);background:rgba(0,20,40,.9);display:flex;align-items:center;justify-content:center;transition:background .12s,border-color .12s;position:relative;cursor:default}
 .cell.ship{background:rgba(0,232,122,.1);border-color:rgba(0,232,122,.4)}
-.cell.ship::after{content:'';width:7px;height:7px;background:var(--green);border-radius:50%;box-shadow:0 0 5px var(--green);opacity:.85}
+.cell.ship::after{content:'';width:14px;height:14px;background:var(--green);border-radius:50%;box-shadow:0 0 8px var(--green);opacity:.9}
 .cell.selected{background:rgba(0,232,122,.18);border-color:rgba(0,232,122,.7)}
-.cell.selected::after{content:'';width:8px;height:8px;background:var(--green);border-radius:50%;box-shadow:0 0 8px var(--green);animation:sp 1s infinite}
+.cell.selected::after{content:'';width:16px;height:16px;background:var(--green);border-radius:50%;box-shadow:0 0 10px var(--green);animation:sp 1s infinite}
 @keyframes sp{0%,100%{transform:scale(1)}50%{transform:scale(1.25)}}
 .cell.hit{background:rgba(220,50,50,.25);border-color:rgba(220,50,50,.6);animation:hitf .3s ease-out}
-.cell.hit::after{content:'';width:10px;height:10px;background:var(--red);border-radius:50%;box-shadow:0 0 8px var(--red);opacity:.9}
+.cell.hit::after{content:'✕';color:var(--red);font-size:18px;font-weight:900;line-height:1;text-shadow:0 0 6px var(--red)}
 .cell.miss{background:rgba(0,80,140,.2);border-color:rgba(0,100,160,.3)}
-.cell.miss::after{content:'';width:4px;height:4px;background:#2a6a9a;border-radius:50%;opacity:.7}
+.cell.miss::after{content:'·';color:#4a8ab0;font-size:28px;line-height:1}
 .cell.placing:hover{background:rgba(0,232,122,.1);border-color:rgba(0,232,122,.4);cursor:crosshair}
 .cell.fireable{cursor:crosshair}
 .cell.fireable:hover{background:rgba(220,50,50,.12);border-color:rgba(220,50,50,.5)}
@@ -381,7 +381,7 @@ select option{background:var(--surface)}
 </div>
 
 <script>
-const SERVER = 'https://battleship-cpsc3750.onrender.com';
+const SERVER = 'https://battleship-cpsc3750-y92m.onrender.com';
 
 const S = {
   playerId: null,
@@ -970,10 +970,10 @@ function renderGrid(containerId, board, size, fireable, onFire) {
 
   // Column labels (A B C ...)
   const colRow = document.createElement('div');
-  colRow.style.cssText = `display:flex;margin-left:${cs+4}px;margin-bottom:2px`;
+  colRow.style.cssText = `display:flex;margin-left:24px;margin-bottom:2px`;
   for (let c2=0; c2<size; c2++) {
     const lbl = document.createElement('div');
-    lbl.style.cssText = `width:${cs}px;text-align:center;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);line-height:1`;
+    lbl.style.cssText = `width:${cs}px;text-align:center;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);line-height:1;flex-shrink:0`;
     lbl.textContent = String.fromCharCode(65+c2);
     colRow.appendChild(lbl);
   }
@@ -984,7 +984,7 @@ function renderGrid(containerId, board, size, fireable, onFire) {
 
   // Row labels (1 2 3 ...)
   const rowLabels = document.createElement('div');
-  rowLabels.style.cssText = `display:flex;flex-direction:column;margin-right:4px`;
+  rowLabels.style.cssText = `display:flex;flex-direction:column;margin-right:4px;width:20px;flex-shrink:0`;
 
   const g = document.createElement('div');
   g.className = 'grid';
@@ -992,7 +992,7 @@ function renderGrid(containerId, board, size, fireable, onFire) {
 
   board.forEach((row, r) => {
     const lbl = document.createElement('div');
-    lbl.style.cssText = `width:${cs}px;height:${cs}px;display:flex;align-items:center;justify-content:center;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim)`;
+    lbl.style.cssText = `width:20px;height:${cs}px;display:flex;align-items:center;justify-content:center;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);flex-shrink:0`;
     lbl.textContent = r+1;
     rowLabels.appendChild(lbl);
 
