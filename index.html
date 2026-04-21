@@ -558,21 +558,33 @@ async function createGame() {
   const gs = parseInt(document.getElementById('c-grid').value);
   const mp = parseInt(document.getElementById('c-maxp').value);
   clearMsg('create-msg');
+
   try {
     const res = await api('/api/games', {
       method: 'POST',
-      body: JSON.stringify({creator_id: S.playerId, grid_size: gs, max_players: mp})
+      body: JSON.stringify({ creator_id: S.playerId, grid_size: gs, max_players: mp })
     });
+
     const d = await res.json();
-    if (!res.ok) { msg('create-msg', `⚠ ${d.error || 'Failed to create game.'}`, 'err'); return; }
+    if (!res.ok) {
+      msg('create-msg', `⚠ ${d.error || 'Failed to create game.'}`, 'err');
+      return;
+    }
+
     S.gameId = d.game_id || d.id;
-    S.gridSize = gs;
-    S.maxPlayers = mp;
+
+    // fetch authoritative game state from server
+    const gRes = await api(`/api/games/${S.gameId}`);
+    const g = await gRes.json();
+
+    S.gridSize = g.grid_size || gs;
+    S.maxPlayers = g.max_players || mp;
     S.knownPlayers = [S.playerId];
     S.orderedPlayers = [];
+
     stopPoll();
-    enterWaiting(S.gameId, gs, mp, 1);
-  } catch(e) {
+    enterWaiting(S.gameId, S.gridSize, S.maxPlayers, g.active_players || 1);
+  } catch (e) {
     msg('create-msg', '⚠ Server unreachable.', 'err');
   }
 }
@@ -608,10 +620,17 @@ async function viewGame(gameId, gridSize) {
 // ── WAITING ──────────────────────────────────────────────
 function enterWaiting(gameId, gridSize, maxPlayers, currentPlayers) {
   show('waiting');
+
+  // reset stale UI from any previous game
+  document.getElementById('btn-go-place').style.display = 'none';
+  clearMsg('waiting-msg');
+  document.getElementById('waiting-msg').textContent = '';
+
   const url = window.location.href.split('?')[0];
   document.getElementById('share-box').innerHTML =
     `Share this URL with your opponent:<br><strong style="color:var(--accent)">${url}</strong><br><br>
      They register, then click <strong>JOIN</strong> on Game #${gameId} in the lobby.`;
+
   updateWaitInfo(gameId, gridSize, maxPlayers, currentPlayers);
   stopPoll();
   S.pollTimer = setInterval(() => pollWaiting(gameId), 2500);
@@ -629,17 +648,31 @@ async function pollWaiting(gameId) {
   try {
     const res = await api(`/api/games/${gameId}`);
     const g = await res.json();
-    updateWaitInfo(gameId, g.grid_size, g.max_players || '?', g.active_players || '?');
-    // Only show "Place Ships" once all players have joined
-    const mp = g.max_players || S.maxPlayers || 2;
-    const full = g.active_players >= mp;
+
+    // keep frontend state synced to server
+    S.gridSize = g.grid_size || S.gridSize || 10;
+    S.maxPlayers = g.max_players || S.maxPlayers || 2;
+
+    updateWaitInfo(gameId, S.gridSize, S.maxPlayers, g.active_players || 0);
+
+    const full = (g.active_players || 0) >= S.maxPlayers;
+
     document.getElementById('btn-go-place').style.display = full ? 'inline-flex' : 'none';
+
     if (full) {
       document.getElementById('waiting-msg').className = 'msg ok';
-      document.getElementById('waiting-msg').textContent = '✓ All players joined! Click Place My Ships to continue.';
+      document.getElementById('waiting-msg').textContent =
+        '✓ All players joined! Click Place My Ships to continue.';
+    } else {
+      clearMsg('waiting-msg');
+      document.getElementById('waiting-msg').textContent = '';
     }
-    if (g.status === 'active') { stopPoll(); enterGame(gameId); }
-  } catch(e) {}
+
+    if (g.status === 'active') {
+      stopPoll();
+      enterGame(gameId);
+    }
+  } catch (e) {}
 }
 
 async function rejoinGame(gameId) {
