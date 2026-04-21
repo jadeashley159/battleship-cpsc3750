@@ -683,44 +683,53 @@ function buildPlaceGrid(size) {
   const c = document.getElementById('place-grid');
   c.innerHTML = '';
   const cs = cellSz(size);
-  const table = document.createElement('table');
-  table.style.cssText = `border-collapse:collapse;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);table-layout:fixed`;
+  const LABEL = 24; // px for row label column
 
-  // thead with col labels
-  const theadEl = document.createElement('thead');
-  const headerRow = document.createElement('tr');
-  const corner = document.createElement('th');
-  corner.style.cssText = `width:20px;min-width:20px;padding:0`;
-  headerRow.appendChild(corner);
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display:inline-block;';
+
+  // Col labels row
+  const colLabelRow = document.createElement('div');
+  colLabelRow.style.cssText = `display:flex;margin-left:${LABEL}px;`;
   for (let col = 0; col < size; col++) {
-    const th = document.createElement('th');
-    th.style.cssText = `width:${cs}px;min-width:${cs}px;text-align:center;padding-bottom:3px;font-weight:normal;color:var(--dim)`;
-    th.textContent = String.fromCharCode(65 + col);
-    headerRow.appendChild(th);
+    const lbl = document.createElement('div');
+    lbl.style.cssText = `width:${cs}px;flex-shrink:0;text-align:center;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);padding-bottom:2px;`;
+    lbl.textContent = String.fromCharCode(65 + col);
+    colLabelRow.appendChild(lbl);
   }
-  theadEl.appendChild(headerRow);
-  table.appendChild(theadEl);
+  wrap.appendChild(colLabelRow);
 
-  // tbody with rows
-  const tbody = document.createElement('tbody');
+  // Grid body
+  const body = document.createElement('div');
+  body.style.cssText = 'display:flex;';
+
+  // Row labels
+  const rowLabelCol = document.createElement('div');
+  rowLabelCol.style.cssText = `display:flex;flex-direction:column;width:${LABEL}px;flex-shrink:0;`;
   for (let r = 0; r < size; r++) {
-    const tr = document.createElement('tr');
-    const rowTh = document.createElement('td');
-    rowTh.style.cssText = `width:20px;min-width:20px;text-align:right;padding-right:4px;font-size:9px;color:var(--dim);vertical-align:middle;height:${cs}px`;
-    rowTh.textContent = r + 1;
-    tr.appendChild(rowTh);
-    for (let col = 0; col < size; col++) {
-      const td = document.createElement('td');
-      td.style.cssText = `width:${cs}px;min-width:${cs}px;height:${cs}px;padding:0;border:1px solid rgba(0,180,255,.25);background:#020f22;box-sizing:border-box;`;
-      td.className = 'cell placing';
-      td.id = `pc-${r}-${col}`;
-      td.onclick = () => togglePlace(r, col);
-      tr.appendChild(td);
-    }
-    tbody.appendChild(tr);
+    const lbl = document.createElement('div');
+    lbl.style.cssText = `width:${LABEL}px;height:${cs}px;flex-shrink:0;display:flex;align-items:center;justify-content:flex-end;padding-right:4px;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);`;
+    lbl.textContent = r + 1;
+    rowLabelCol.appendChild(lbl);
   }
-  table.appendChild(tbody);
-  c.appendChild(table);
+  body.appendChild(rowLabelCol);
+
+  // The actual grid
+  const grid = document.createElement('div');
+  grid.style.cssText = `display:grid;grid-template-columns:repeat(${size},${cs}px);border:1px solid rgba(0,200,255,.4);`;
+  for (let r = 0; r < size; r++) {
+    for (let col = 0; col < size; col++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell placing';
+      cell.style.cssText = `width:${cs}px;height:${cs}px;border:1px solid rgba(0,160,220,.2);box-sizing:border-box;background:#020f22;`;
+      cell.id = `pc-${r}-${col}`;
+      cell.onclick = () => togglePlace(r, col);
+      grid.appendChild(cell);
+    }
+  }
+  body.appendChild(grid);
+  wrap.appendChild(body);
+  c.appendChild(wrap);
 }
 
 function togglePlace(r, c) {
@@ -740,15 +749,16 @@ function togglePlace(r, c) {
 }
 
 function refreshPlaceGrid() {
+  const cs = cellSz(S.gridSize);
   document.querySelectorAll('#place-grid .cell').forEach(cell => {
     cell.className = 'cell placing';
-    cell.style.cssText = `width:${cellSz(S.gridSize)}px;height:${cellSz(S.gridSize)}px;padding:0;`;
+    cell.style.cssText = `width:${cs}px;height:${cs}px;border:1px solid rgba(0,160,220,.2);box-sizing:border-box;background:#020f22;`;
   });
   S.pendingShips.forEach(s => {
     const cell = document.getElementById(`pc-${s.row}-${s.col}`);
     if (cell) {
       cell.className = 'cell selected';
-      cell.style.cssText = `width:${cellSz(S.gridSize)}px;height:${cellSz(S.gridSize)}px;padding:0;`;
+      cell.style.cssText = `width:${cs}px;height:${cs}px;border:1px solid rgba(0,232,122,.7);box-sizing:border-box;background:rgba(0,232,122,.35);`;
     }
   });
   document.getElementById('btn-confirm').disabled = S.pendingShips.length !== 3;
@@ -994,48 +1004,54 @@ function renderGrid(containerId, board, size, fireable, onFire) {
   if (!c) return;
   c.innerHTML = '';
   const cs = cellSz(size);
+  const LABEL = 24;
 
-  const table = document.createElement('table');
-  table.style.cssText = `border-collapse:collapse;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);table-layout:fixed`;
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display:inline-block;';
 
-  // thead
-  const theadEl = document.createElement('thead');
-  const headerRow = document.createElement('tr');
-  const corner = document.createElement('td');
-  corner.style.cssText = `width:20px;min-width:20px;padding:0`;
-  headerRow.appendChild(corner);
+  // Col labels
+  const colLabelRow = document.createElement('div');
+  colLabelRow.style.cssText = `display:flex;margin-left:${LABEL}px;`;
   for (let col = 0; col < size; col++) {
-    const th = document.createElement('td');
-    th.style.cssText = `width:${cs}px;min-width:${cs}px;text-align:center;padding-bottom:3px;color:var(--dim)`;
-    th.textContent = String.fromCharCode(65 + col);
-    headerRow.appendChild(th);
+    const lbl = document.createElement('div');
+    lbl.style.cssText = `width:${cs}px;flex-shrink:0;text-align:center;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);padding-bottom:2px;`;
+    lbl.textContent = String.fromCharCode(65 + col);
+    colLabelRow.appendChild(lbl);
   }
-  theadEl.appendChild(headerRow);
-  table.appendChild(theadEl);
+  wrap.appendChild(colLabelRow);
 
-  // tbody
-  const tbody = document.createElement('tbody');
+  const body = document.createElement('div');
+  body.style.cssText = 'display:flex;';
+
+  // Row labels
+  const rowLabelCol = document.createElement('div');
+  rowLabelCol.style.cssText = `display:flex;flex-direction:column;width:${LABEL}px;flex-shrink:0;`;
   board.forEach((row, r) => {
-    const tr = document.createElement('tr');
-    const rowLabel = document.createElement('td');
-    rowLabel.style.cssText = `width:20px;min-width:20px;text-align:right;padding-right:4px;color:var(--dim);vertical-align:middle;height:${cs}px`;
-    rowLabel.textContent = r + 1;
-    tr.appendChild(rowLabel);
-
-    row.forEach((st, col) => {
-      const td = document.createElement('td');
-      td.className = 'cell ' + st;
-      td.style.cssText = `width:${cs}px;min-width:${cs}px;height:${cs}px;padding:0;border:1px solid rgba(0,180,255,.25);background:#020f22;box-sizing:border-box;`;
-      if (fireable && st === 'empty') {
-        td.classList.add('fireable');
-        td.onclick = () => onFire(r, col);
-      }
-      tr.appendChild(td);
-    });
-    tbody.appendChild(tr);
+    const lbl = document.createElement('div');
+    lbl.style.cssText = `width:${LABEL}px;height:${cs}px;flex-shrink:0;display:flex;align-items:center;justify-content:flex-end;padding-right:4px;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);`;
+    lbl.textContent = r + 1;
+    rowLabelCol.appendChild(lbl);
   });
-  table.appendChild(tbody);
-  c.appendChild(table);
+  body.appendChild(rowLabelCol);
+
+  // Grid
+  const grid = document.createElement('div');
+  grid.style.cssText = `display:grid;grid-template-columns:repeat(${size},${cs}px);border:1px solid rgba(0,200,255,.4);`;
+  board.forEach((row, r) => {
+    row.forEach((st, col) => {
+      const cell = document.createElement('div');
+      cell.className = 'cell ' + st;
+      cell.style.cssText = `width:${cs}px;height:${cs}px;border:1px solid rgba(0,160,220,.2);box-sizing:border-box;background:#020f22;`;
+      if (fireable && st === 'empty') {
+        cell.classList.add('fireable');
+        cell.onclick = () => onFire(r, col);
+      }
+      grid.appendChild(cell);
+    });
+  });
+  body.appendChild(grid);
+  wrap.appendChild(body);
+  c.appendChild(wrap);
 }
 
 function getNextPlayer(game, moves, playerOrder) {
