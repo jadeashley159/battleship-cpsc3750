@@ -1011,56 +1011,92 @@ function renderGrid(containerId, board, size, fireable, onFire) {
   const c = document.getElementById(containerId);
   if (!c) return;
   c.innerHTML = '';
+
   const cs = cellSz(size);
-  const cols = String.fromCharCode;
 
-  // Wrapper with labels
   const wrap = document.createElement('div');
-  wrap.style.cssText = 'display:inline-block';
+  wrap.style.display = 'inline-block';
 
-  // Column labels (A B C ...)
-  const colRow = document.createElement('div');
-  colRow.style.cssText = `display:flex;margin-left:24px;margin-bottom:2px`;
-  for (let c2=0; c2<size; c2++) {
+  // Top header row
+  const header = document.createElement('div');
+  header.style.display = 'grid';
+  header.style.gridTemplateColumns = `${cs}px repeat(${size}, ${cs}px)`;
+  header.style.marginBottom = '2px';
+
+  // top-left empty corner
+  const corner = document.createElement('div');
+  corner.style.width = `${cs}px`;
+  corner.style.height = `${cs}px`;
+  header.appendChild(corner);
+
+  for (let col = 0; col < size; col++) {
     const lbl = document.createElement('div');
-    lbl.style.cssText = `width:${cs}px;text-align:center;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);line-height:1;flex-shrink:0`;
-    lbl.textContent = String.fromCharCode(65+c2);
-    colRow.appendChild(lbl);
+    lbl.textContent = String.fromCharCode(65 + col);
+    lbl.style.cssText = `
+      width:${cs}px;
+      height:${cs}px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-family:'Share Tech Mono',monospace;
+      font-size:9px;
+      color:var(--dim);
+      line-height:1;
+    `;
+    header.appendChild(lbl);
   }
-  wrap.appendChild(colRow);
 
-  const bodyRow = document.createElement('div');
-  bodyRow.style.cssText = 'display:flex';
+  wrap.appendChild(header);
 
-  // Row labels (1 2 3 ...)
+  // Body rows
+  const body = document.createElement('div');
+  body.style.display = 'grid';
+  body.style.gridTemplateColumns = `${cs}px auto`;
+  body.style.alignItems = 'start';
+
   const rowLabels = document.createElement('div');
-  rowLabels.style.cssText = `display:flex;flex-direction:column;margin-right:4px;width:20px;flex-shrink:0`;
+  rowLabels.style.display = 'grid';
+  rowLabels.style.gridTemplateRows = `repeat(${size}, ${cs}px)`;
 
   const g = document.createElement('div');
   g.className = 'grid';
-  g.style.gridTemplateColumns = `repeat(${size},${cs}px)`;
+  g.style.gridTemplateColumns = `repeat(${size}, ${cs}px)`;
 
-  board.forEach((row, r) => {
-    const lbl = document.createElement('div');
-    lbl.style.cssText = `width:20px;height:${cs}px;display:flex;align-items:center;justify-content:center;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);flex-shrink:0`;
-    lbl.textContent = r+1;
-    rowLabels.appendChild(lbl);
+  for (let r = 0; r < size; r++) {
+    const rowLbl = document.createElement('div');
+    rowLbl.textContent = r + 1;
+    rowLbl.style.cssText = `
+      width:${cs}px;
+      height:${cs}px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-family:'Share Tech Mono',monospace;
+      font-size:9px;
+      color:var(--dim);
+      line-height:1;
+    `;
+    rowLabels.appendChild(rowLbl);
 
-    row.forEach((st, col) => {
+    for (let col = 0; col < size; col++) {
+      const st = board[r][col];
       const cell = document.createElement('div');
       cell.className = 'cell ' + st;
-      cell.style.width = cell.style.height = cs + 'px';
+      cell.style.width = `${cs}px`;
+      cell.style.height = `${cs}px`;
+
       if (fireable && st === 'empty') {
         cell.classList.add('fireable');
         cell.onclick = () => onFire(r, col);
       }
-      g.appendChild(cell);
-    });
-  });
 
-  bodyRow.appendChild(rowLabels);
-  bodyRow.appendChild(g);
-  wrap.appendChild(bodyRow);
+      g.appendChild(cell);
+    }
+  }
+
+  body.appendChild(rowLabels);
+  body.appendChild(g);
+  wrap.appendChild(body);
   c.appendChild(wrap);
 }
 
