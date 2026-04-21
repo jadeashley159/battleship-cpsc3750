@@ -2,42 +2,66 @@
 
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>BATTLESHIP</title>
 
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;500;600&display=swap" rel="stylesheet">
 
 <style>
 :root {
-  /* CORE BACKGROUND CONTRAST FIX */
-  --bg: #02040a;
-  --surface: #071522;
-  --surface2: #0b1f2e;
+  /* CORE BACKGROUND */
+  --bg: #02050b;
+  --surface: #0a1722;
+  --surface2: #0f2233;
 
-  /* GRID CONTRAST */
+  /* GRID (FIXED CONTRAST) */
   --grid-bg: #010a12;
-  --grid-line: #2fd4ff;
+  --grid-line: #33d1ff;
 
   /* GAME STATES */
-  --ship: #00ff8c;
+  --ship: #00ff88;
   --hit: #ff3b3b;
-  --miss: #7f8c99;
+  --miss: #8aa0b3;
 
   /* UI */
   --accent: #00c8f0;
-  --border: #1c3d55;
-  --text: #d6f2ff;
-  --dim: #6fa3c2;
+  --border: #1e4a6b;
+  --text: #d7f3ff;
+  --dim: #6ea4c5;
+
+  /* EFFECTS */
+  --hit-bg: rgba(255, 59, 59, 0.25);
+  --ship-bg: rgba(0, 255, 136, 0.25);
 }
 
 /* ───── BASE ───── */
-* { box-sizing:border-box; margin:0; padding:0; }
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
 body {
-  background: radial-gradient(circle at top, #041424, #000 75%);
+  background: radial-gradient(circle at top, #061626, #000 80%);
   color: var(--text);
   font-family: 'Rajdhani', sans-serif;
+}
+
+/* subtle scanlines but NOT overpowering */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 4px,
+    rgba(255,255,255,0.02) 4px,
+    rgba(255,255,255,0.02) 5px
+  );
+  pointer-events: none;
+  opacity: 0.15;
 }
 
 /* HEADER */
@@ -51,8 +75,13 @@ header {
 }
 
 /* ───── SCREENS ───── */
-.screen { display:none; padding:20px; }
-.screen.active { display:block; }
+.screen {
+  display: none;
+  padding: 20px;
+}
+.screen.active {
+  display: block;
+}
 
 /* ───── BUTTONS ───── */
 button {
@@ -61,13 +90,8 @@ button {
   padding: 10px 14px;
   font-family: 'Orbitron';
   cursor: pointer;
-  color: black;
-}
-
-/* ───── LAYOUT ───── */
-.container {
-  display: flex;
-  gap: 20px;
+  color: #000;
+  font-weight: bold;
 }
 
 /* ───── PANELS ───── */
@@ -77,32 +101,33 @@ button {
   padding: 16px;
 }
 
-/* ───── GRID FIX (IMPORTANT) ───── */
+/* ───── GRID (MAIN FIX) ───── */
 .grid {
   background: var(--grid-bg);
   border: 2px solid var(--grid-line);
   display: inline-block;
+  box-shadow: 0 0 12px rgba(51, 209, 255, 0.12);
 }
 
 .cell {
   width: 34px;
   height: 34px;
   background: #06101a;
-  border: 1px solid rgba(47,212,255,0.35);
-  text-align:center;
-  vertical-align:middle;
-  transition: 0.15s;
+  border: 1px solid rgba(51, 209, 255, 0.35);
+  text-align: center;
+  vertical-align: middle;
+  transition: 0.12s ease;
 }
 
-/* EMPTY HOVER TARGET */
+/* hover target */
 .cell.fireable:hover {
-  background: rgba(255,60,60,0.25);
+  background: rgba(255, 59, 59, 0.25);
   cursor: crosshair;
 }
 
-/* SHIP (GREEN) */
+/* YOUR SHIPS (GREEN) */
 .cell.ship {
-  background: rgba(0,255,140,0.35);
+  background: var(--ship-bg);
   border-color: var(--ship);
 }
 
@@ -110,21 +135,23 @@ button {
 .cell.hit {
   background: var(--hit);
   color: white;
-  font-weight: bold;
+  font-weight: 900;
+  font-size: 18px;
 }
 
-/* MISS (GRAY/BLUE) */
+/* MISS (GRAY BLUE) */
 .cell.miss {
-  background: rgba(120,130,140,0.35);
+  background: rgba(138, 160, 179, 0.25);
   color: var(--miss);
+  font-size: 16px;
 }
 
 /* LABELS */
 th {
   font-size: 11px;
   color: var(--dim);
-  padding: 2px;
   font-family: 'Share Tech Mono';
+  padding: 2px;
 }
 
 /* MOVE LOG */
@@ -136,7 +163,7 @@ th {
   color: var(--dim);
 }
 
-/* TURN INDICATOR */
+/* TURN BOX */
 .turn-box {
   padding: 8px 14px;
   border: 1px solid var(--grid-line);
@@ -152,7 +179,7 @@ th {
   color: var(--dim);
 }
 
-/* LOGIN / INPUTS */
+/* INPUTS */
 input, select {
   padding: 10px;
   background: #000814;
@@ -171,9 +198,9 @@ input, select {
 <!-- REGISTER -->
 
 <div class="screen active" id="screen-register">
-  <div class="panel" style="max-width:400px;margin:auto;">
+  <div class="panel" style="max-width:420px;margin:auto;">
     <h2>LOGIN</h2>
-    <input id="reg-name" placeholder="username"/>
+    <input id="reg-name" placeholder="username" />
     <button onclick="register()">ENTER</button>
     <div id="reg-msg"></div>
   </div>
@@ -189,7 +216,7 @@ input, select {
   </div>
 </div>
 
-<!-- WAIT -->
+<!-- WAITING -->
 
 <div class="screen" id="screen-waiting">
   <div class="panel">
@@ -212,7 +239,7 @@ input, select {
 <!-- GAME -->
 
 <div class="screen" id="screen-game">
-  <div class="container">
+  <div style="display:flex;gap:20px;">
 
 ```
 <div class="panel">
@@ -227,7 +254,7 @@ input, select {
 </div>
 
 <div class="panel">
-  <h3>LOG</h3>
+  <h3>MOVE LOG</h3>
   <div class="move-log" id="move-log"></div>
 </div>
 ```
@@ -240,7 +267,7 @@ const SERVER = "http://127.0.0.1:5000";
 
 let playerId=null, gameId=null, size=10;
 
-/* ───── REGISTER ───── */
+/* LOGIN */
 async function register(){
   const name=document.getElementById("reg-name").value;
   const res=await fetch(SERVER+"/api/players",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:name})});
@@ -250,11 +277,11 @@ async function register(){
   loadGames();
 }
 
-/* ───── LOBBY ───── */
+/* LOBBY */
 async function loadGames(){
   const res=await fetch(SERVER+"/api/games");
   const games=await res.json();
-  document.getElementById("games-list").innerHTML=
+  document.getElementById("games-list").innerHTML =
     games.map(g=>`<button onclick="join(${g.game_id})">Game ${g.game_id}</button>`).join("");
 }
 
@@ -265,14 +292,18 @@ async function createGame(){
   show("waiting");
 }
 
-/* ───── JOIN ───── */
+/* JOIN */
 async function join(id){
   gameId=id;
-  await fetch(`${SERVER}/api/games/${id}/join`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({player_id:playerId})});
+  await fetch(`${SERVER}/api/games/${id}/join`,{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({player_id:playerId})
+  });
   show("waiting");
 }
 
-/* ───── PLACE ───── */
+/* PLACE */
 function goToPlace(){
   show("place");
   buildGrid("place-grid",true);
@@ -294,11 +325,12 @@ function buildGrid(id,place=false){
     }
     t.appendChild(tr);
   }
+
   el.innerHTML="";
   el.appendChild(t);
 }
 
-/* ───── GAME ───── */
+/* NAV */
 function show(id){
   document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
   document.getElementById("screen-"+id).classList.add("active");
