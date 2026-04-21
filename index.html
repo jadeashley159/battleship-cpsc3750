@@ -2,124 +2,164 @@
 
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Battleship</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>BATTLESHIP</title>
 
-<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Rajdhani:wght@400;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;500;600&display=swap" rel="stylesheet">
 
 <style>
 :root {
-  --bg: #01060b;
-  --panel: #071722;
-  --grid-bg: #031521;
+  /* CORE BACKGROUND CONTRAST FIX */
+  --bg: #02040a;
+  --surface: #071522;
+  --surface2: #0b1f2e;
 
-  --line: #2fd4ff;
-  --accent: #00c8f0;
+  /* GRID CONTRAST */
+  --grid-bg: #010a12;
+  --grid-line: #2fd4ff;
 
+  /* GAME STATES */
+  --ship: #00ff8c;
   --hit: #ff3b3b;
-  --miss: #6ec1e4;
-  --ship: #00ff9c;
+  --miss: #7f8c99;
 
-  --text: #d9f3ff;
+  /* UI */
+  --accent: #00c8f0;
+  --border: #1c3d55;
+  --text: #d6f2ff;
   --dim: #6fa3c2;
 }
 
 /* ───── BASE ───── */
+* { box-sizing:border-box; margin:0; padding:0; }
+
 body {
-  margin: 0;
-  font-family: 'Rajdhani', sans-serif;
-  background: radial-gradient(circle at top, #02111a, #000 80%);
+  background: radial-gradient(circle at top, #041424, #000 75%);
   color: var(--text);
+  font-family: 'Rajdhani', sans-serif;
 }
 
 /* HEADER */
 header {
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--line);
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--grid-line);
   font-family: 'Orbitron';
   letter-spacing: 3px;
   color: var(--accent);
+  background: rgba(0,0,0,0.6);
 }
 
-/* BUTTON */
+/* ───── SCREENS ───── */
+.screen { display:none; padding:20px; }
+.screen.active { display:block; }
+
+/* ───── BUTTONS ───── */
 button {
   background: var(--accent);
   border: none;
-  padding: 10px 16px;
+  padding: 10px 14px;
   font-family: 'Orbitron';
   cursor: pointer;
+  color: black;
 }
 
-/* ───── GRID ───── */
-.grid table {
-  border-collapse: collapse;
+/* ───── LAYOUT ───── */
+.container {
+  display: flex;
+  gap: 20px;
 }
 
-.grid td {
-  width: 36px;
-  height: 36px;
+/* ───── PANELS ───── */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 16px;
+}
+
+/* ───── GRID FIX (IMPORTANT) ───── */
+.grid {
   background: var(--grid-bg);
-  border: 1px solid rgba(47,212,255,0.4);
-  text-align: center;
-  vertical-align: middle;
+  border: 2px solid var(--grid-line);
+  display: inline-block;
+}
+
+.cell {
+  width: 34px;
+  height: 34px;
+  background: #06101a;
+  border: 1px solid rgba(47,212,255,0.35);
+  text-align:center;
+  vertical-align:middle;
   transition: 0.15s;
 }
 
-/* hover */
-.fireable:hover {
-  background: rgba(255,60,60,0.3);
+/* EMPTY HOVER TARGET */
+.cell.fireable:hover {
+  background: rgba(255,60,60,0.25);
   cursor: crosshair;
 }
 
-/* STATES */
-.ship {
-  background: rgba(0,255,156,0.35);
+/* SHIP (GREEN) */
+.cell.ship {
+  background: rgba(0,255,140,0.35);
+  border-color: var(--ship);
 }
 
-.hit {
+/* HIT (RED) */
+.cell.hit {
   background: var(--hit);
   color: white;
   font-weight: bold;
 }
 
-.miss {
-  background: rgba(110,193,228,0.3);
+/* MISS (GRAY/BLUE) */
+.cell.miss {
+  background: rgba(120,130,140,0.35);
   color: var(--miss);
 }
 
-/* labels */
+/* LABELS */
 th {
-  color: var(--dim);
   font-size: 11px;
+  color: var(--dim);
   padding: 2px;
+  font-family: 'Share Tech Mono';
 }
 
-/* panels */
-.panel {
-  background: var(--panel);
-  padding: 15px;
-  margin: 10px;
-  border: 1px solid var(--line);
+/* MOVE LOG */
+.move-log {
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: 'Share Tech Mono';
+  font-size: 11px;
+  color: var(--dim);
 }
 
-/* layout */
-.container {
-  display: flex;
-  gap: 20px;
-  padding: 20px;
+/* TURN INDICATOR */
+.turn-box {
+  padding: 8px 14px;
+  border: 1px solid var(--grid-line);
+  font-family: 'Orbitron';
 }
 
-.board {
-  flex: 1;
+.turn-box.yours {
+  color: var(--ship);
+  border-color: var(--ship);
 }
 
-/* messages */
-.msg {
-  margin-top: 10px;
-  font-size: 13px;
+.turn-box.theirs {
+  color: var(--dim);
 }
 
+/* LOGIN / INPUTS */
+input, select {
+  padding: 10px;
+  background: #000814;
+  border: 1px solid var(--border);
+  color: var(--text);
+  width: 100%;
+}
 </style>
 
 </head>
@@ -128,91 +168,140 @@ th {
 
 <header>BATTLESHIP</header>
 
-<div class="container">
+<!-- REGISTER -->
 
-  <div class="board panel">
-    <h3>Your Grid</h3>
-    <div id="my-grid" class="grid"></div>
+<div class="screen active" id="screen-register">
+  <div class="panel" style="max-width:400px;margin:auto;">
+    <h2>LOGIN</h2>
+    <input id="reg-name" placeholder="username"/>
+    <button onclick="register()">ENTER</button>
+    <div id="reg-msg"></div>
   </div>
+</div>
 
-  <div class="board panel">
-    <h3>Enemy Grid</h3>
-    <div id="enemy-grid" class="grid"></div>
+<!-- LOBBY -->
+
+<div class="screen" id="screen-lobby">
+  <div class="panel">
+    <h3>LOBBY</h3>
+    <button onclick="createGame()">CREATE GAME</button>
+    <div id="games-list"></div>
   </div>
+</div>
 
+<!-- WAIT -->
+
+<div class="screen" id="screen-waiting">
+  <div class="panel">
+    <h3>WAITING</h3>
+    <div id="wait-info"></div>
+    <button onclick="goToPlace()">PLACE SHIPS</button>
+  </div>
+</div>
+
+<!-- PLACE -->
+
+<div class="screen" id="screen-place">
+  <div class="panel">
+    <h3>PLACE SHIPS</h3>
+    <div id="place-grid"></div>
+    <button onclick="confirmPlace()">CONFIRM</button>
+  </div>
+</div>
+
+<!-- GAME -->
+
+<div class="screen" id="screen-game">
+  <div class="container">
+
+```
+<div class="panel">
+  <h3>YOU</h3>
+  <div id="my-grid" class="grid"></div>
+</div>
+
+<div class="panel">
+  <h3>ENEMY</h3>
+  <div id="opp-grid" class="grid"></div>
+  <div class="turn-box" id="turn-box">TURN</div>
+</div>
+
+<div class="panel">
+  <h3>LOG</h3>
+  <div class="move-log" id="move-log"></div>
+</div>
+```
+
+  </div>
 </div>
 
 <script>
 const SERVER = "http://127.0.0.1:5000";
 
-let playerId = null;
-let gameId = null;
-let size = 10;
+let playerId=null, gameId=null, size=10;
 
-/* ───── GRID RENDER ───── */
-function renderGrid(id, board, clickable=false) {
-  const container = document.getElementById(id);
-  container.innerHTML = "";
+/* ───── REGISTER ───── */
+async function register(){
+  const name=document.getElementById("reg-name").value;
+  const res=await fetch(SERVER+"/api/players",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:name})});
+  const d=await res.json();
+  playerId=d.player_id;
+  show("lobby");
+  loadGames();
+}
 
-  const table = document.createElement("table");
+/* ───── LOBBY ───── */
+async function loadGames(){
+  const res=await fetch(SERVER+"/api/games");
+  const games=await res.json();
+  document.getElementById("games-list").innerHTML=
+    games.map(g=>`<button onclick="join(${g.game_id})">Game ${g.game_id}</button>`).join("");
+}
 
-  // header
-  const header = document.createElement("tr");
-  header.appendChild(document.createElement("th"));
+async function createGame(){
+  const res=await fetch(SERVER+"/api/games",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({creator_id:playerId,grid_size:10,max_players:2})});
+  const d=await res.json();
+  gameId=d.game_id;
+  show("waiting");
+}
 
-  for (let c = 0; c < size; c++) {
-    const th = document.createElement("th");
-    th.textContent = String.fromCharCode(65 + c);
-    header.appendChild(th);
-  }
-  table.appendChild(header);
+/* ───── JOIN ───── */
+async function join(id){
+  gameId=id;
+  await fetch(`${SERVER}/api/games/${id}/join`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({player_id:playerId})});
+  show("waiting");
+}
 
-  for (let r = 0; r < size; r++) {
-    const tr = document.createElement("tr");
+/* ───── PLACE ───── */
+function goToPlace(){
+  show("place");
+  buildGrid("place-grid",true);
+}
 
-    const rowLabel = document.createElement("th");
-    rowLabel.textContent = r + 1;
-    tr.appendChild(rowLabel);
+function buildGrid(id,place=false){
+  const el=document.getElementById(id);
+  const t=document.createElement("table");
 
-    for (let c = 0; c < size; c++) {
-      const td = document.createElement("td");
-
-      const val = board[r][c];
-      if (val === "ship") td.classList.add("ship");
-      if (val === "hit") td.classList.add("hit"), td.textContent = "X";
-      if (val === "miss") td.classList.add("miss"), td.textContent = "•";
-
-      if (clickable && val === "empty") {
-        td.classList.add("fireable");
-        td.onclick = () => fire(r, c);
+  for(let r=0;r<size;r++){
+    const tr=document.createElement("tr");
+    for(let c=0;c<size;c++){
+      const td=document.createElement("td");
+      td.className="cell";
+      if(place){
+        td.onclick=()=>td.classList.toggle("ship");
       }
-
       tr.appendChild(td);
     }
-
-    table.appendChild(tr);
+    t.appendChild(tr);
   }
-
-  container.appendChild(table);
+  el.innerHTML="";
+  el.appendChild(t);
 }
 
-/* ───── DEMO BOARD (so you SEE the UI working) ───── */
-function demoBoard() {
-  const b = Array.from({length:size}, () => Array(size).fill("empty"));
-
-  b[2][3] = "ship";
-  b[4][5] = "hit";
-  b[6][2] = "miss";
-
-  renderGrid("my-grid", b);
-  renderGrid("enemy-grid", b, true);
-}
-
-demoBoard();
-
-/* ───── FIRE ───── */
-async function fire(r,c) {
-  alert("Firing at " + r + "," + c);
+/* ───── GAME ───── */
+function show(id){
+  document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
+  document.getElementById("screen-"+id).classList.add("active");
 }
 </script>
 
