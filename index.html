@@ -132,12 +132,12 @@ select option{background:var(--surface)}
 
 /* GRID */
 .grid-scroll{overflow-x:auto;padding-bottom:4px}
-.grid{display:grid;border:1px solid var(--border);background:rgba(0,30,60,.3)}
-.cell{border-right:1px solid rgba(0,150,200,.15);border-bottom:1px solid rgba(0,150,200,.15);border-left:none;border-top:none;background:rgba(0,20,40,.9);display:flex;align-items:center;justify-content:center;transition:background .12s,border-color .12s;position:relative;cursor:default}
-.cell.ship{background:rgba(0,232,122,.1);border-color:rgba(0,232,122,.4)}
-.cell.ship::after{content:'';width:14px;height:14px;background:var(--green);border-radius:50%;box-shadow:0 0 8px var(--green);opacity:.9}
-.cell.selected{background:rgba(0,232,122,.18);border-color:rgba(0,232,122,.7)}
-.cell.selected::after{content:'';width:16px;height:16px;background:var(--green);border-radius:50%;box-shadow:0 0 10px var(--green);animation:sp 1s infinite}
+.grid{display:grid;border:2px solid rgba(0,200,255,.5);background:#000}
+.cell{border-right:1px solid rgba(0,180,255,.25);border-bottom:1px solid rgba(0,180,255,.25);border-left:none;border-top:none;background:#020f22;display:flex;align-items:center;justify-content:center;transition:background .12s;position:relative;cursor:default}
+.cell.ship{background:rgba(0,232,122,.35);border-color:rgba(0,232,122,.8) !important}
+.cell.ship::after{content:'';width:60%;height:60%;background:var(--green);border-radius:3px;box-shadow:0 0 8px var(--green);opacity:.9}
+.cell.selected{background:rgba(0,232,122,.4);border-color:rgba(0,232,122,.9) !important}
+.cell.selected::after{content:'';width:60%;height:60%;background:var(--green);border-radius:3px;box-shadow:0 0 12px var(--green);animation:sp 1s infinite}
 @keyframes sp{0%,100%{transform:scale(1)}50%{transform:scale(1.25)}}
 .cell.hit{background:rgba(220,50,50,.25);border-color:rgba(220,50,50,.6);animation:hitf .3s ease-out}
 .cell.hit::after{content:'✕';color:var(--red);font-size:18px;font-weight:900;line-height:1;text-shadow:0 0 6px var(--red)}
@@ -633,10 +633,14 @@ async function pollWaiting(gameId) {
     // Only show "Place Ships" once all players have joined
     const mp = g.max_players || S.maxPlayers || 2;
     const full = g.active_players >= mp;
-    document.getElementById('btn-go-place').style.display = full ? 'inline-flex' : 'none';
+    // Always show Place My Ships — players can place before others join
+    document.getElementById('btn-go-place').style.display = 'inline-flex';
     if (full) {
       document.getElementById('waiting-msg').className = 'msg ok';
       document.getElementById('waiting-msg').textContent = '✓ All players joined! Click Place My Ships to continue.';
+    } else {
+      document.getElementById('waiting-msg').className = 'msg info';
+      document.getElementById('waiting-msg').textContent = 'You can place your ships now — game starts when everyone is ready.';
     }
     if (g.status === 'active') { stopPoll(); enterGame(gameId); }
   } catch(e) {}
@@ -678,21 +682,37 @@ function cellSz(size) { return size > 12 ? 28 : size > 9 ? 34 : 38; }
 function buildPlaceGrid(size) {
   const c = document.getElementById('place-grid');
   c.innerHTML = '';
-  const g = document.createElement('div');
-  g.className = 'grid';
   const cs = cellSz(size);
-  g.style.cssText = `display:grid;grid-template-columns:repeat(${size},${cs}px);border:1px solid var(--border);`;
-  for (let r = 0; r < size; r++) {
-    for (let col = 0; col < size; col++) {
-      const cell = document.createElement('div');
-      cell.className = 'cell placing';
-      cell.style.width = cell.style.height = cs + 'px';
-      cell.id = `pc-${r}-${col}`;
-      cell.onclick = () => togglePlace(r, col);
-      g.appendChild(cell);
-    }
+  const table = document.createElement('table');
+  table.style.cssText = 'border-collapse:collapse;font-family:Share Tech Mono,monospace;font-size:9px;color:var(--dim)';
+  const thead = document.createElement('tr');
+  const corner = document.createElement('th');
+  corner.style.cssText = 'width:20px;padding:0';
+  thead.appendChild(corner);
+  for (let col = 0; col < size; col++) {
+    const th = document.createElement('th');
+    th.style.cssText = `width:${cs}px;text-align:center;padding-bottom:3px;font-weight:normal;color:var(--dim)`;
+    th.textContent = String.fromCharCode(65 + col);
+    thead.appendChild(th);
   }
-  c.appendChild(g);
+  table.appendChild(thead);
+  for (let r = 0; r < size; r++) {
+    const tr = document.createElement('tr');
+    const rowTh = document.createElement('th');
+    rowTh.style.cssText = `text-align:right;padding-right:4px;font-weight:normal;color:var(--dim);vertical-align:middle;height:${cs}px`;
+    rowTh.textContent = r + 1;
+    tr.appendChild(rowTh);
+    for (let col = 0; col < size; col++) {
+      const td = document.createElement('td');
+      td.style.cssText = `width:${cs}px;height:${cs}px;padding:0;`;
+      td.className = 'cell placing';
+      td.id = `pc-${r}-${col}`;
+      td.onclick = () => togglePlace(r, col);
+      tr.appendChild(td);
+    }
+    table.appendChild(tr);
+  }
+  c.appendChild(table);
 }
 
 function togglePlace(r, c) {
@@ -714,10 +734,14 @@ function togglePlace(r, c) {
 function refreshPlaceGrid() {
   document.querySelectorAll('#place-grid .cell').forEach(cell => {
     cell.className = 'cell placing';
+    cell.style.cssText = `width:${cellSz(S.gridSize)}px;height:${cellSz(S.gridSize)}px;padding:0;`;
   });
   S.pendingShips.forEach(s => {
     const cell = document.getElementById(`pc-${s.row}-${s.col}`);
-    if (cell) cell.className = 'cell selected';
+    if (cell) {
+      cell.className = 'cell selected';
+      cell.style.cssText = `width:${cellSz(S.gridSize)}px;height:${cellSz(S.gridSize)}px;padding:0;`;
+    }
   });
   document.getElementById('btn-confirm').disabled = S.pendingShips.length !== 3;
 }
@@ -962,56 +986,48 @@ function renderGrid(containerId, board, size, fireable, onFire) {
   if (!c) return;
   c.innerHTML = '';
   const cs = cellSz(size);
-  const cols = String.fromCharCode;
 
-  // Wrapper with labels
-  const wrap = document.createElement('div');
-  wrap.style.cssText = 'display:inline-block';
+  // Use a table for perfect label alignment
+  const table = document.createElement('table');
+  table.style.cssText = 'border-collapse:collapse;font-family:Share Tech Mono,monospace;font-size:9px;color:var(--dim)';
 
-  // Column labels (A B C ...)
-  const colRow = document.createElement('div');
-  colRow.style.cssText = `display:flex;margin-left:24px;margin-bottom:2px`;
-  for (let c2=0; c2<size; c2++) {
-    const lbl = document.createElement('div');
-    lbl.style.cssText = `width:${cs}px;text-align:center;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);line-height:1;flex-shrink:0`;
-    lbl.textContent = String.fromCharCode(65+c2);
-    colRow.appendChild(lbl);
+  // Header row with col labels
+  const thead = document.createElement('tr');
+  const cornerTh = document.createElement('th');
+  cornerTh.style.cssText = `width:20px;padding:0`;
+  thead.appendChild(cornerTh);
+  for (let col = 0; col < size; col++) {
+    const th = document.createElement('th');
+    th.style.cssText = `width:${cs}px;text-align:center;padding-bottom:3px;font-weight:normal;color:var(--dim)`;
+    th.textContent = String.fromCharCode(65 + col);
+    thead.appendChild(th);
   }
-  wrap.appendChild(colRow);
+  table.appendChild(thead);
 
-  const bodyRow = document.createElement('div');
-  bodyRow.style.cssText = 'display:flex';
-
-  // Row labels (1 2 3 ...)
-  const rowLabels = document.createElement('div');
-  rowLabels.style.cssText = `display:flex;flex-direction:column;margin-right:4px;width:20px;flex-shrink:0`;
-
-  const g = document.createElement('div');
-  g.className = 'grid';
-  g.style.gridTemplateColumns = `repeat(${size},${cs}px)`;
-
+  // Data rows
   board.forEach((row, r) => {
-    const lbl = document.createElement('div');
-    lbl.style.cssText = `width:20px;height:${cs}px;display:flex;align-items:center;justify-content:center;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);flex-shrink:0`;
-    lbl.textContent = r+1;
-    rowLabels.appendChild(lbl);
+    const tr = document.createElement('tr');
+
+    // Row label
+    const rowTh = document.createElement('th');
+    rowTh.style.cssText = `text-align:right;padding-right:4px;font-weight:normal;color:var(--dim);vertical-align:middle;height:${cs}px`;
+    rowTh.textContent = r + 1;
+    tr.appendChild(rowTh);
 
     row.forEach((st, col) => {
-      const cell = document.createElement('div');
-      cell.className = 'cell ' + st;
-      cell.style.width = cell.style.height = cs + 'px';
+      const td = document.createElement('td');
+      td.className = 'cell ' + st;
+      td.style.cssText = `width:${cs}px;height:${cs}px;padding:0;`;
       if (fireable && st === 'empty') {
-        cell.classList.add('fireable');
-        cell.onclick = () => onFire(r, col);
+        td.classList.add('fireable');
+        td.onclick = () => onFire(r, col);
       }
-      g.appendChild(cell);
+      tr.appendChild(td);
     });
+    table.appendChild(tr);
   });
 
-  bodyRow.appendChild(rowLabels);
-  bodyRow.appendChild(g);
-  wrap.appendChild(bodyRow);
-  c.appendChild(wrap);
+  c.appendChild(table);
 }
 
 function getNextPlayer(game, moves, playerOrder) {
