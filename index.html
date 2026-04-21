@@ -898,8 +898,9 @@ async function renderGame(game, moves) {
     document.getElementById('opp-bname').textContent =
       (S.names[opponents[0]] || `Player ${opponents[0]}`).toUpperCase();
     const oppBoard = makeBoard(game.grid_size, [], myShots, false);
+    const mainTargetId = opponents[0];
     renderGrid('opp-grid', oppBoard, game.grid_size,
-      myTurn, (r, c) => fire(r, c));
+    myTurn, (r, c) => fire(r, c, mainTargetId));
   }
 
   // Extra opponents (3+ player games)
@@ -917,7 +918,7 @@ async function renderGame(game, moves) {
     ec.appendChild(div);
     const shots = moves.filter(m => m.player_id === S.playerId);
     const b = makeBoard(game.grid_size, [], shots, false);
-    setTimeout(() => renderGrid(`eg-${id}`, b, game.grid_size, myTurn, (r,c) => fire(r,c)), 0);
+    setTimeout(() => renderGrid(`eg-${id}`, b, game.grid_size, myTurn, (r,c) => fire(r, c, id)), 0);
   });
 
   // Players list
@@ -1046,11 +1047,10 @@ function getNextPlayer(game, moves, playerOrder) {
 }
 
 // ── FIRE ─────────────────────────────────────────────────
-async function fire(row, col) {
-  if (S.firing) return; // prevent double-click
+async function fire(row, col, targetPlayerId) {
+  if (S.firing) return;
   S.firing = true;
 
-  // Optimistic UI — immediately mark the cell as pending
   const tt = document.getElementById('turn-txt');
   const prevTxt = tt.textContent;
   tt.textContent = 'FIRING...';
@@ -1058,9 +1058,16 @@ async function fire(row, col) {
   try {
     const res = await api(`/api/games/${S.gameId}/fire`, {
       method: 'POST',
-      body: JSON.stringify({player_id: S.playerId, row, col})
+      body: JSON.stringify({
+        player_id: S.playerId,
+        target_player_id: targetPlayerId,
+        row,
+        col
+      })
     });
+
     const d = await res.json();
+
     if (res.ok) {
       await refreshGame();
     } else if (res.status === 403) {
@@ -1070,7 +1077,7 @@ async function fire(row, col) {
     } else {
       turnError(d.error || 'Fire failed.');
     }
-  } catch(e) {
+  } catch (e) {
     turnError('Server unreachable.');
   } finally {
     S.firing = false;

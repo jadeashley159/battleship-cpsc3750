@@ -92,6 +92,7 @@ class Move(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     game_id = db.Column(db.Integer, nullable=False)
     player_id = db.Column(db.Integer, nullable=False)
+    target_player_id = db.Column(db.Integer, nullable=False)
     row = db.Column(db.Integer, nullable=False)
     col = db.Column(db.Integer, nullable=False)
     result = db.Column(db.String(10), nullable=False)
@@ -474,10 +475,11 @@ def fire(game_id):
         return jsonify({"error": "bad_request"}), 400
 
     player_id = parse_player_id(pick(data, "player_id", "playerId", "playerld"))
+    target_player_id = parse_player_id(pick(data, "target_player_id", "targetPlayerId", "target_playerId"))
     row = pick(data, "row")
     col = pick(data, "col")
 
-    if player_id is None:
+    if player_id is None or target_player_id is None:
         return jsonify({"error": "bad_request"}), 400
 
     game = Game.query.get(gid)
@@ -488,14 +490,22 @@ def fire(game_id):
     if not player:
         return jsonify({"error": "invalid player"}), 403
 
+    target_player = Player.query.get(target_player_id)
+    if not target_player:
+        return jsonify({"error": "target player not found"}), 404
+
     if GamePlayer.query.filter_by(game_id=gid, player_id=player_id).first() is None:
         return jsonify({"error": "player not in game"}), 403
 
-    # Finished — 400
+    if GamePlayer.query.filter_by(game_id=gid, player_id=target_player_id).first() is None:
+        return jsonify({"error": "target player not in game"}), 403
+
+    if target_player_id == player_id:
+        return jsonify({"error": "cannot target self"}), 400
+
     if game.status == "finished":
         return jsonify({"error": "game finished"}), 400
 
-    # Not active — 400
     if game.status != "active":
         return jsonify({"error": "bad_request"}), 400
 
@@ -505,31 +515,44 @@ def fire(game_id):
     if row < 0 or row >= game.grid_size or col < 0 or col >= game.grid_size:
         return jsonify({"error": "bad_request"}), 400
 
-    # Duplicate shot — 409 (must check before turn so both players get right error)
-    existing_move = Move.query.filter_by(game_id=gid, row=row, col=col).first()
+    # target must still be alive
+    target_remaining = Ship.query.filter_by(game_id=gid, player_id=target_player_id).count()
+    if target_remaining == 0:
+        return jsonify({"error": "target already eliminated"}), 400
+
+    # duplicate shot on the target's board
+    existing_move = Move.query.filter_by(
+        game_id=gid,
+        target_player_id=target_player_id,
+        row=row,
+        col=col
+    ).first()
     if existing_move:
         return jsonify({"error": "conflict"}), 409
 
-    # Check whose turn it is
+    # enforce turn order
     players_in_game = GamePlayer.query.filter_by(game_id=gid).order_by(GamePlayer.turn_order).all()
     current = players_in_game[game.current_turn_index].player_id
     if current != player_id:
         return jsonify({"error": "forbidden"}), 403
-    
-    opponent_ships = Ship.query.filter(
-        Ship.game_id == gid,
-        Ship.player_id != player_id,
-        Ship.row == row,
-        Ship.col == col
-    ).all()
-    
-    result = "hit" if opponent_ships else "miss"
-    for ship in opponent_ships:
-        db.session.delete(ship)
+
+    # only hit ships on the targeted opponent's board
+    hit_ship = Ship.query.filter_by(
+        game_id=gid,
+        player_id=target_player_id,
+        row=row,
+        col=col
+    ).first()
+
+    result = "hit" if hit_ship else "miss"
+
+    if hit_ship:
+        db.session.delete(hit_ship)
 
     db.session.add(Move(
         game_id=gid,
         player_id=player_id,
+        target_player_id=target_player_id,
         row=row,
         col=col,
         result=result,
@@ -542,6 +565,7 @@ def fire(game_id):
 
     db.session.commit()
 
+    # check if all opponents are eliminated
     living_opponents = []
     for gp in players_in_game:
         if gp.player_id == player_id:
@@ -552,6 +576,7 @@ def fire(game_id):
 
     if len(living_opponents) == 0:
         game.status = "finished"
+
         for gp in players_in_game:
             p = Player.query.get(gp.player_id)
             p.games_played += 1
@@ -559,15 +584,18 @@ def fire(game_id):
                 p.wins += 1
             else:
                 p.losses += 1
+
         db.session.commit()
 
         return jsonify({
             "result": result,
+            "target_player_id": target_player_id,
             "next_player_id": None,
             "game_status": "finished",
             "winner_id": player_id
         }), 200
 
+    # advance turn, skipping eliminated players
     n = len(players_in_game)
     idx = game.current_turn_index
     for _ in range(n):
@@ -582,10 +610,10 @@ def fire(game_id):
 
     return jsonify({
         "result": result,
+        "target_player_id": target_player_id,
         "next_player_id": players_in_game[idx].player_id,
         "game_status": "playing"
     }), 200
-
 
 # -------------------------
 # MOVES
@@ -607,6 +635,7 @@ def get_moves(game_id):
         payload.append({
             "game_id": gid,
             "player_id": m.player_id,
+            "target_player_id": m.target_player_id,
             "row": m.row,
             "col": m.col,
             "result": m.result,
