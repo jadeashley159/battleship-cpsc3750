@@ -131,35 +131,18 @@ select option{background:var(--surface)}
 .sl-icon{width:20px;height:20px;border:1px solid var(--dim);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0}
 
 /* GRID */
-.grid-scroll {
-  overflow-x: auto;
-  padding-bottom: 4px;
-  display: flex;
-  justify-content: center;
-}
+.grid-scroll{overflow-x:auto;padding-bottom:4px}
 .grid{display:grid;border:1px solid var(--border);background:rgba(0,30,60,.3)}
-.cell{border:1px solid rgba(0,150,200,.15);background:rgba(0,20,40,.9);display:flex;align-items:center;justify-content:center;transition:background .12s,border-color .12s;position:relative;cursor:default}
-.cell.ship{
-  background:rgba(0,20,40,.9);
-  border-color:rgba(0,232,122,.25);
-}
-
-.cell.ship::after{
-  content:'';
-  width:8px;
-  height:8px;
-  background:var(--green);
-  border-radius:50%;
-  box-shadow:0 0 8px var(--green);
-  opacity:.95;
-}
+.cell{border-right:1px solid rgba(0,150,200,.15);border-bottom:1px solid rgba(0,150,200,.15);border-left:none;border-top:none;background:rgba(0,20,40,.9);display:flex;align-items:center;justify-content:center;transition:background .12s,border-color .12s;position:relative;cursor:default}
+.cell.ship{background:rgba(0,232,122,.1);border-color:rgba(0,232,122,.4)}
+.cell.ship::after{content:'';width:14px;height:14px;background:var(--green);border-radius:50%;box-shadow:0 0 8px var(--green);opacity:.9}
 .cell.selected{background:rgba(0,232,122,.18);border-color:rgba(0,232,122,.7)}
 .cell.selected::after{content:'';width:16px;height:16px;background:var(--green);border-radius:50%;box-shadow:0 0 10px var(--green);animation:sp 1s infinite}
 @keyframes sp{0%,100%{transform:scale(1)}50%{transform:scale(1.25)}}
 .cell.hit{background:rgba(220,50,50,.25);border-color:rgba(220,50,50,.6);animation:hitf .3s ease-out}
 .cell.hit::after{content:'✕';color:var(--red);font-size:18px;font-weight:900;line-height:1;text-shadow:0 0 6px var(--red)}
 .cell.miss{background:rgba(0,80,140,.2);border-color:rgba(0,100,160,.3)}
-.cell.miss::after{content:'·';color:#4a8ab0;font-size:28px;line-height:1}
+.cell.miss::after{content:'•';color:#4a8ab0;font-size:20px;line-height:1}
 .cell.placing:hover{background:rgba(0,232,122,.1);border-color:rgba(0,232,122,.4);cursor:crosshair}
 .cell.fireable{cursor:crosshair}
 .cell.fireable:hover{background:rgba(220,50,50,.12);border-color:rgba(220,50,50,.5)}
@@ -575,33 +558,21 @@ async function createGame() {
   const gs = parseInt(document.getElementById('c-grid').value);
   const mp = parseInt(document.getElementById('c-maxp').value);
   clearMsg('create-msg');
-
   try {
     const res = await api('/api/games', {
       method: 'POST',
-      body: JSON.stringify({ creator_id: S.playerId, grid_size: gs, max_players: mp })
+      body: JSON.stringify({creator_id: S.playerId, grid_size: gs, max_players: mp})
     });
-
     const d = await res.json();
-    if (!res.ok) {
-      msg('create-msg', `⚠ ${d.error || 'Failed to create game.'}`, 'err');
-      return;
-    }
-
+    if (!res.ok) { msg('create-msg', `⚠ ${d.error || 'Failed to create game.'}`, 'err'); return; }
     S.gameId = d.game_id || d.id;
-
-    // fetch authoritative game state from server
-    const gRes = await api(`/api/games/${S.gameId}`);
-    const g = await gRes.json();
-
-    S.gridSize = g.grid_size || gs;
-    S.maxPlayers = g.max_players || mp;
+    S.gridSize = gs;
+    S.maxPlayers = mp;
     S.knownPlayers = [S.playerId];
     S.orderedPlayers = [];
-
     stopPoll();
-    enterWaiting(S.gameId, S.gridSize, S.maxPlayers, g.active_players || 1);
-  } catch (e) {
+    enterWaiting(S.gameId, gs, mp, 1);
+  } catch(e) {
     msg('create-msg', '⚠ Server unreachable.', 'err');
   }
 }
@@ -637,17 +608,10 @@ async function viewGame(gameId, gridSize) {
 // ── WAITING ──────────────────────────────────────────────
 function enterWaiting(gameId, gridSize, maxPlayers, currentPlayers) {
   show('waiting');
-
-  // reset stale UI from any previous game
-  document.getElementById('btn-go-place').style.display = 'none';
-  clearMsg('waiting-msg');
-  document.getElementById('waiting-msg').textContent = '';
-
   const url = window.location.href.split('?')[0];
   document.getElementById('share-box').innerHTML =
     `Share this URL with your opponent:<br><strong style="color:var(--accent)">${url}</strong><br><br>
      They register, then click <strong>JOIN</strong> on Game #${gameId} in the lobby.`;
-
   updateWaitInfo(gameId, gridSize, maxPlayers, currentPlayers);
   stopPoll();
   S.pollTimer = setInterval(() => pollWaiting(gameId), 2500);
@@ -665,31 +629,17 @@ async function pollWaiting(gameId) {
   try {
     const res = await api(`/api/games/${gameId}`);
     const g = await res.json();
-
-    // keep frontend state synced to server
-    S.gridSize = g.grid_size || S.gridSize || 10;
-    S.maxPlayers = g.max_players || S.maxPlayers || 2;
-
-    updateWaitInfo(gameId, S.gridSize, S.maxPlayers, g.active_players || 0);
-
-    const full = (g.active_players || 0) >= S.maxPlayers;
-
+    updateWaitInfo(gameId, g.grid_size, g.max_players || '?', g.active_players || '?');
+    // Only show "Place Ships" once all players have joined
+    const mp = g.max_players || S.maxPlayers || 2;
+    const full = g.active_players >= mp;
     document.getElementById('btn-go-place').style.display = full ? 'inline-flex' : 'none';
-
     if (full) {
       document.getElementById('waiting-msg').className = 'msg ok';
-      document.getElementById('waiting-msg').textContent =
-        '✓ All players joined! Click Place My Ships to continue.';
-    } else {
-      clearMsg('waiting-msg');
-      document.getElementById('waiting-msg').textContent = '';
+      document.getElementById('waiting-msg').textContent = '✓ All players joined! Click Place My Ships to continue.';
     }
-
-    if (g.status === 'active') {
-      stopPoll();
-      enterGame(gameId);
-    }
-  } catch (e) {}
+    if (g.status === 'active') { stopPoll(); enterGame(gameId); }
+  } catch(e) {}
 }
 
 async function rejoinGame(gameId) {
@@ -723,12 +673,7 @@ function enterPlace(gameId) {
   updateSlots();
 }
 
-function cellSz(size) {
-  if (size >= 15) return 24;
-  if (size >= 12) return 28;
-  if (size >= 10) return 32;
-  return 38;
-}
+function cellSz(size) { return size > 12 ? 28 : size > 9 ? 34 : 38; }
 
 function buildPlaceGrid(size) {
   const c = document.getElementById('place-grid');
@@ -736,7 +681,7 @@ function buildPlaceGrid(size) {
   const g = document.createElement('div');
   g.className = 'grid';
   const cs = cellSz(size);
-  g.style.gridTemplateColumns = `repeat(${size},${cs}px)`;
+  g.style.cssText = `display:grid;grid-template-columns:repeat(${size},${cs}px);border:1px solid var(--border);`;
   for (let r = 0; r < size; r++) {
     for (let col = 0; col < size; col++) {
       const cell = document.createElement('div');
@@ -1016,92 +961,56 @@ function renderGrid(containerId, board, size, fireable, onFire) {
   const c = document.getElementById(containerId);
   if (!c) return;
   c.innerHTML = '';
-
   const cs = cellSz(size);
+  const cols = String.fromCharCode;
 
+  // Wrapper with labels
   const wrap = document.createElement('div');
-  wrap.style.display = 'inline-block';
+  wrap.style.cssText = 'display:inline-block';
 
-  // Top header row
-  const header = document.createElement('div');
-  header.style.display = 'grid';
-  header.style.gridTemplateColumns = `${cs}px repeat(${size}, ${cs}px)`;
-  header.style.marginBottom = '2px';
-
-  // top-left empty corner
-  const corner = document.createElement('div');
-  corner.style.width = `${cs}px`;
-  corner.style.height = `${cs}px`;
-  header.appendChild(corner);
-
-  for (let col = 0; col < size; col++) {
+  // Column labels (A B C ...)
+  const colRow = document.createElement('div');
+  colRow.style.cssText = `display:flex;margin-left:24px;margin-bottom:2px`;
+  for (let c2=0; c2<size; c2++) {
     const lbl = document.createElement('div');
-    lbl.textContent = String.fromCharCode(65 + col);
-    lbl.style.cssText = `
-      width:${cs}px;
-      height:${cs}px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      font-family:'Share Tech Mono',monospace;
-      font-size:9px;
-      color:var(--dim);
-      line-height:1;
-    `;
-    header.appendChild(lbl);
+    lbl.style.cssText = `width:${cs}px;text-align:center;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);line-height:1;flex-shrink:0`;
+    lbl.textContent = String.fromCharCode(65+c2);
+    colRow.appendChild(lbl);
   }
+  wrap.appendChild(colRow);
 
-  wrap.appendChild(header);
+  const bodyRow = document.createElement('div');
+  bodyRow.style.cssText = 'display:flex';
 
-  // Body rows
-  const body = document.createElement('div');
-  body.style.display = 'grid';
-  body.style.gridTemplateColumns = `${cs}px auto`;
-  body.style.alignItems = 'start';
-
+  // Row labels (1 2 3 ...)
   const rowLabels = document.createElement('div');
-  rowLabels.style.display = 'grid';
-  rowLabels.style.gridTemplateRows = `repeat(${size}, ${cs}px)`;
+  rowLabels.style.cssText = `display:flex;flex-direction:column;margin-right:4px;width:20px;flex-shrink:0`;
 
   const g = document.createElement('div');
   g.className = 'grid';
-  g.style.gridTemplateColumns = `repeat(${size}, ${cs}px)`;
+  g.style.gridTemplateColumns = `repeat(${size},${cs}px)`;
 
-  for (let r = 0; r < size; r++) {
-    const rowLbl = document.createElement('div');
-    rowLbl.textContent = r + 1;
-    rowLbl.style.cssText = `
-      width:${cs}px;
-      height:${cs}px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      font-family:'Share Tech Mono',monospace;
-      font-size:9px;
-      color:var(--dim);
-      line-height:1;
-    `;
-    rowLabels.appendChild(rowLbl);
+  board.forEach((row, r) => {
+    const lbl = document.createElement('div');
+    lbl.style.cssText = `width:20px;height:${cs}px;display:flex;align-items:center;justify-content:center;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);flex-shrink:0`;
+    lbl.textContent = r+1;
+    rowLabels.appendChild(lbl);
 
-    for (let col = 0; col < size; col++) {
-      const st = board[r][col];
+    row.forEach((st, col) => {
       const cell = document.createElement('div');
       cell.className = 'cell ' + st;
-      cell.style.width = `${cs}px`;
-      cell.style.height = `${cs}px`;
-
+      cell.style.width = cell.style.height = cs + 'px';
       if (fireable && st === 'empty') {
         cell.classList.add('fireable');
         cell.onclick = () => onFire(r, col);
       }
-
       g.appendChild(cell);
-    }
-  }
+    });
+  });
 
-  body.appendChild(rowLabels);
-  body.appendChild(g);
-  wrap.appendChild(body);
+  bodyRow.appendChild(rowLabels);
+  bodyRow.appendChild(g);
+  wrap.appendChild(bodyRow);
   c.appendChild(wrap);
 }
 
