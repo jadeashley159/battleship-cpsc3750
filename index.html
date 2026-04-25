@@ -146,7 +146,8 @@ select.form-input{cursor:pointer}
 .grid-wrapper{display:flex;gap:0;flex:1;min-height:0}
 .grid-col-labels,.grid-row-labels{display:flex;align-items:center;justify-content:center}
 .grid-area{flex:1;display:grid;border:2px solid var(--border-strong);border-radius:4px;overflow:hidden;background:var(--foam)}
-.grid-cell{border-right:1px solid var(--border);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .1s;position:relative;aspect-ratio:1}
+.grid-cell{border-right:1px solid var(--border);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .1s;position:relative}
+.grid-area{overflow:hidden}
 .grid-cell:hover{background:rgba(36,144,184,.15)}
 .grid-cell.ship{background:#2ecc71;cursor:pointer}
 .grid-cell.ship:hover{background:#27ae60}
@@ -387,7 +388,7 @@ select.form-input{cursor:pointer}
     <div class="header-brand">NAVAL STRIKE — PLACEMENT</div>
     <div class="header-nav">
       <span class="header-user" id="lobby-game-label"></span>
-      <button class="btn-header" onclick="goToDashboard()">← Back</button>
+      <button class="btn-header" onclick="confirmLeave()">← Dashboard</button>
     </div>
   </div>
   <div class="content">
@@ -437,6 +438,7 @@ select.form-input{cursor:pointer}
     <div class="header-brand">NAVAL STRIKE — BATTLE</div>
     <div class="header-nav">
       <span class="header-user" id="game-user-label"></span>
+      <button class="btn-header" onclick="confirmLeave()">← Dashboard</button>
     </div>
   </div>
   <div class="content">
@@ -515,7 +517,7 @@ select.form-input{cursor:pointer}
 
 <script>
 // ==================== STATE ====================
-const VERSION = 'v1.5';
+const VERSION = 'v1.6';
 const DEFAULT_SERVER = 'https://battleship-cpsc3750.onrender.com';
 let API = localStorage.getItem('ns_server') || DEFAULT_SERVER;
 let currentUser = null; // {player_id, username, prefName}
@@ -831,8 +833,8 @@ async function refreshLobby(gid) {
     }
   }
 
-  // Only enter game when server confirms all ships placed (status flips to active)
-  if (allShipsPlaced) {
+  // Only enter game when server confirms all ships placed AND all players joined
+  if (allShipsPlaced && allJoined) {
     clearInterval(gameState.pollingInterval);
     toast('All ships placed! Battle begins!');
     enterGame(gid);
@@ -855,7 +857,7 @@ function buildPlacementGrid() {
   wrap.style.cssText = 'display:flex;flex-direction:column;flex:1;min-height:0';
   // Col header
   const colH = document.createElement('div');
-  colH.style.cssText = `display:grid;grid-template-columns:20px repeat(${gs},1fr);margin-bottom:2px`;
+  colH.style.cssText = `display:grid;grid-template-columns:22px repeat(${gs},1fr);margin-bottom:2px`;
   colH.appendChild(Object.assign(document.createElement('div'),{style:''}));
   for (let c=0; c<gs; c++) {
     const lbl = document.createElement('div');
@@ -869,7 +871,7 @@ function buildPlacementGrid() {
   gridRow.style.cssText = 'display:flex;flex:1;min-height:0';
   // Row labels
   const rowLabels = document.createElement('div');
-  rowLabels.style.cssText = `display:grid;grid-template-rows:repeat(${gs},1fr);width:20px`;
+  rowLabels.style.cssText = `display:grid;grid-template-rows:repeat(${gs},1fr);width:22px`;
   for (let r=0; r<gs; r++) {
     const lbl = document.createElement('div');
     lbl.className = 'axis-label';
@@ -1130,7 +1132,7 @@ function buildGrid(containerId, gs, prefix, clickable) {
   const wrap = document.createElement('div');
   wrap.style.cssText = 'display:flex;flex-direction:column;flex:1;min-height:0;width:100%';
   const colH = document.createElement('div');
-  colH.style.cssText = `display:grid;grid-template-columns:18px repeat(${gs},1fr);margin-bottom:2px`;
+  colH.style.cssText = `display:grid;grid-template-columns:22px repeat(${gs},1fr);margin-bottom:2px`;
   colH.appendChild(document.createElement('div'));
   for (let c=0; c<gs; c++) {
     const lbl = document.createElement('div');
@@ -1143,7 +1145,7 @@ function buildGrid(containerId, gs, prefix, clickable) {
   const gridRow = document.createElement('div');
   gridRow.style.cssText = 'display:flex;flex:1;min-height:0';
   const rowLabels = document.createElement('div');
-  rowLabels.style.cssText = `display:grid;grid-template-rows:repeat(${gs},1fr);width:18px`;
+  rowLabels.style.cssText = `display:grid;grid-template-rows:repeat(${gs},1fr);width:22px`;
   for (let r=0; r<gs; r++) {
     const lbl = document.createElement('div');
     lbl.className = 'axis-label';
@@ -1155,7 +1157,7 @@ function buildGrid(containerId, gs, prefix, clickable) {
   const gridArea = document.createElement('div');
   gridArea.className = 'grid-area';
   gridArea.id = prefix + '-grid-area';
-  gridArea.style.cssText = `grid-template-columns:repeat(${gs},1fr);grid-template-rows:repeat(${gs},1fr);display:grid;flex:1`;
+  gridArea.style.cssText = `grid-template-columns:repeat(${gs},1fr);grid-template-rows:repeat(${gs},1fr);display:grid;flex:1;box-sizing:border-box`;
   for (let r=0; r<gs; r++) {
     for (let c=0; c<gs; c++) {
       const cell = document.createElement('div');
@@ -1300,20 +1302,27 @@ async function onFire(r, c) {
   updateTurnUI();
 }
 async function pollGame(gid) {
-  const gr = await api('/api/games/' + gid);
-  if (!gr.ok) return;
+  const [gr, mr] = await Promise.all([
+    api('/api/games/' + gid),
+    api('/api/games/' + gid + '/moves')
+  ]);
+  if (!gr.ok || !mr.ok) return;
   currentGame = gr.data;
   currentGame.game_id = gid;
-  // Get moves to update boards
-  const mr = await api('/api/games/' + gid + '/moves');
-  if (!mr.ok) return;
   const moves = mr.data;
-  if (moves.length === gameState.lastMoveCount) return;
+  // Always reload if move count changed OR if it's a fresh load
+  if (moves.length === gameState.lastMoveCount && gameState.lastMoveCount > 0) return;
   await loadMoves(gid, moves);
   renderGameBoards();
   updateTurnUI();
   if (currentGame.status === 'finished') {
     stopPolling();
+    // Check if we won or lost
+    const lastMove = moves[moves.length - 1];
+    if (lastMove) {
+      const iWon = lastMove.player_id === currentUser.player_id;
+      showOutcome(iWon, iWon ? currentUser.player_id : lastMove.player_id);
+    }
   }
 }
 async function loadMoves(gid, moves) {
@@ -1355,13 +1364,18 @@ async function loadMoves(gid, moves) {
     gameState.moveLog.push({shooter:sName, target:tName, r, c, result, shooterIdx});
   });
   renderMoveLog();
-  // Determine turn
-  if (currentGame && (currentGame.status === 'active' || currentGame.status === 'playing')) {
-    const turnIdx = currentGame.current_turn_index || 0;
-    const players = gameState.players;
-    if (players.length > turnIdx) {
-      const turnPlayerId = players[turnIdx].player_id;
-      gameState.isMyTurn = (turnPlayerId === currentUser.player_id);
+  // Determine whose turn it is from server's current_turn_index
+  if (currentGame) {
+    const s = currentGame.status;
+    if (s === 'active' || s === 'playing') {
+      const turnIdx = currentGame.current_turn_index || 0;
+      const players = gameState.players;
+      if (players.length > turnIdx) {
+        const turnPlayerId = players[turnIdx].player_id;
+        gameState.isMyTurn = (turnPlayerId === currentUser.player_id);
+      }
+    } else {
+      gameState.isMyTurn = false;
     }
   }
   updateTurnUI();
@@ -1383,13 +1397,23 @@ function addMoveLog(shooter, target, r, c, result) {
 function updateTurnUI() {
   const status = currentGame && currentGame.status;
   if (status === 'finished') return;
+  const isActive = (status === 'active' || status === 'playing');
+  if (!isActive) {
+    document.getElementById('game-status-msg').textContent = 'WAITING FOR PLAYERS...';
+    document.getElementById('game-status-sub').textContent = 'Game has not started yet';
+    return;
+  }
   const isMyTurn = gameState.isMyTurn;
-  document.getElementById('game-status-msg').textContent = isMyTurn ? 'YOUR TURN — FIRE!' : 'WAITING...';
+  // Find whose turn it actually is by name
+  const turnIdx = currentGame.current_turn_index || 0;
+  const turnPlayer = gameState.players[turnIdx];
+  const turnName = turnPlayer ? turnPlayer.username : '?';
+  document.getElementById('game-status-msg').textContent = isMyTurn ? 'YOUR TURN — FIRE!' : turnName.toUpperCase() + "'S TURN";
   document.getElementById('game-status-sub').textContent = isMyTurn
     ? 'Click a cell on the enemy board to fire'
-    : 'Waiting for opponent to fire';
+    : 'Waiting for ' + turnName + ' to fire...';
   const badge = document.getElementById('fire-status-badge');
-  badge.textContent = isMyTurn ? 'Your turn' : "Enemy's turn";
+  badge.textContent = isMyTurn ? 'Your turn' : turnName + "'s turn";
   badge.className = 'badge ' + (isMyTurn ? 'badge-playing' : 'badge-waiting');
 }
 function updateStatusBar(result, nextPid) {
@@ -1428,6 +1452,12 @@ function stopPolling() {
     clearInterval(gameState.pollingInterval);
     gameState.pollingInterval = null;
   }
+}
+function confirmLeave() {
+  if (document.getElementById('page-game').classList.contains('active')) {
+    if (!confirm('Leave the game? Your opponent will be able to keep playing.')) return;
+  }
+  goToDashboard();
 }
 function goToDashboard() {
   stopPolling();
