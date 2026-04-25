@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Naval Strike v4— Battleship</title>
+<title>Naval Strike — Battleship</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -238,6 +238,7 @@ select.form-input{cursor:pointer}
   <div class="login-box">
     <div class="login-title">NAVAL<br>STRIKE</div>
     <div class="login-subtitle">Battleship — 2025</div>
+    <div style="text-align:center;font-size:11px;color:var(--border);margin-top:-12px;margin-bottom:16px;font-family:'DM Mono',monospace" id="login-version"></div>
     <div id="login-alert"></div>
     <div class="login-tabs">
       <button class="login-tab active" id="tab-login" onclick="switchLoginTab('login')">Sign In</button>
@@ -277,7 +278,7 @@ select.form-input{cursor:pointer}
   <div class="header">
     <div class="header-brand">
       <svg width="22" height="22" viewBox="0 0 22 22" fill="none"><path d="M3 15L11 5L19 15H3Z" fill="currentColor" opacity=".3"/><rect x="9" y="13" width="4" height="4" fill="currentColor"/><rect x="1" y="17" width="20" height="2" rx="1" fill="currentColor"/></svg>
-      NAVAL STRIKE
+      NAVAL STRIKE <span id="dash-version" style="font-size:13px;opacity:.5;font-family:'DM Mono',monospace;letter-spacing:0"></span>
     </div>
     <div class="header-nav">
       <span class="header-user" id="dash-user-label"></span>
@@ -383,7 +384,7 @@ select.form-input{cursor:pointer}
 <!-- ===================== LOBBY / PLACEMENT PAGE ===================== -->
 <div id="page-lobby" class="page">
   <div class="header">
-    <div class="header-brand">NAVAL STRIKE v4— PLACEMENT</div>
+    <div class="header-brand">NAVAL STRIKE — PLACEMENT</div>
     <div class="header-nav">
       <span class="header-user" id="lobby-game-label"></span>
       <button class="btn-header" onclick="goToDashboard()">← Back</button>
@@ -434,7 +435,7 @@ select.form-input{cursor:pointer}
 <!-- ===================== GAME PAGE ===================== -->
 <div id="page-game" class="page">
   <div class="header">
-    <div class="header-brand">NAVAL STRIKE v4— BATTLE</div>
+    <div class="header-brand">NAVAL STRIKE — BATTLE</div>
     <div class="header-nav">
       <span class="header-user" id="game-user-label"></span>
     </div>
@@ -515,6 +516,7 @@ select.form-input{cursor:pointer}
 
 <script>
 // ==================== STATE ====================
+const VERSION = 'v1.3';
 const DEFAULT_SERVER = 'https://battleship-cpsc3750.onrender.com';
 let API = localStorage.getItem('ns_server') || DEFAULT_SERVER;
 let currentUser = null; // {player_id, username, prefName}
@@ -645,6 +647,7 @@ function doLogout() {
 async function enterDashboard() {
   showPage('page-dashboard');
   document.getElementById('dash-user-label').textContent = currentUser.prefName || currentUser.username;
+  document.getElementById('dash-version').textContent = VERSION;
   document.getElementById('current-server-badge').textContent = API;
   await loadStats();
   await loadGames();
@@ -926,21 +929,21 @@ function onPlacementHover(r, c) {
   renderPlacementGrid();
 }
 function onPlacementClick(r, c) {
-  const idx = placementState.selectedShip;
-  // Check if clicking on an already-placed ship — if so, pick it back up
-  const clickedShipIdx = placementState.placedShips.find(p => p.r===r && p.c===c);
-  if (clickedShipIdx !== undefined && idx === null) {
-    const shipIdx = clickedShipIdx.shipIdx;
+  let idx = placementState.selectedShip;
+  // Check if clicking on an already-placed ship — pick it back up regardless of selection state
+  const clickedCell = placementState.placedShips.find(p => p.r===r && p.c===c);
+  if (clickedCell !== undefined) {
+    const shipIdx = clickedCell.shipIdx;
     // Remove all cells of that ship
     placementState.placedShips = placementState.placedShips.filter(p => p.shipIdx !== shipIdx);
     placementState.ships[shipIdx] = null;
     // Un-mark button
     const btn = document.getElementById('ship-btn-' + shipIdx);
     if (btn) { btn.classList.remove('placed','selected'); }
-    // Select it so user can re-place immediately
+    // Select it so user can immediately re-place
     placementState.selectedShip = shipIdx;
     if (btn) btn.classList.add('selected');
-    // Hide ready card if it was showing
+    // Show placement toolbar again
     document.getElementById('ship-placement-card').style.display = '';
     document.getElementById('ships-ready-card').style.display = 'none';
     renderPlacementGrid();
@@ -1444,6 +1447,7 @@ function saveProfile() {
 
 // ==================== INIT ====================
 window.addEventListener('load', () => {
+  document.getElementById('login-version').textContent = VERSION;
   // Try auto-login
   const saved = getLocal('ns_current');
   if (saved && saved.player_id && saved.username) {
