@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Naval Strike — Battleship</title>
+<title>Naval Strike — Battleship v3</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -277,7 +277,7 @@ select.form-input{cursor:pointer}
   <div class="header">
     <div class="header-brand">
       <svg width="22" height="22" viewBox="0 0 22 22" fill="none"><path d="M3 15L11 5L19 15H3Z" fill="currentColor" opacity=".3"/><rect x="9" y="13" width="4" height="4" fill="currentColor"/><rect x="1" y="17" width="20" height="2" rx="1" fill="currentColor"/></svg>
-      NAVAL STRIKE v2
+      NAVAL STRIKE
     </div>
     <div class="header-nav">
       <span class="header-user" id="dash-user-label"></span>
@@ -913,11 +913,11 @@ function getShipPreviewCells(r, c, len, horiz) {
   }
   return cells;
 }
-function isValidPlacement(cells) {
+function isValidPlacement(cells, excludeShipIdx=null) {
   const gs = (currentGame && currentGame.grid_size) || 10;
   for (const {r,c} of cells) {
     if (r<0||r>=gs||c<0||c>=gs) return false;
-    if (placementState.placedShips.some(p => p.r===r && p.c===c)) return false;
+    if (placementState.placedShips.some(p => p.r===r && p.c===c && p.shipIdx !== excludeShipIdx)) return false;
   }
   return true;
 }
@@ -927,6 +927,26 @@ function onPlacementHover(r, c) {
 }
 function onPlacementClick(r, c) {
   const idx = placementState.selectedShip;
+  // Check if clicking on an already-placed ship — if so, pick it back up
+  const clickedShipIdx = placementState.placedShips.find(p => p.r===r && p.c===c);
+  if (clickedShipIdx !== undefined && idx === null) {
+    const shipIdx = clickedShipIdx.shipIdx;
+    // Remove all cells of that ship
+    placementState.placedShips = placementState.placedShips.filter(p => p.shipIdx !== shipIdx);
+    placementState.ships[shipIdx] = null;
+    // Un-mark button
+    const btn = document.getElementById('ship-btn-' + shipIdx);
+    if (btn) { btn.classList.remove('placed','selected'); }
+    // Select it so user can re-place immediately
+    placementState.selectedShip = shipIdx;
+    if (btn) btn.classList.add('selected');
+    // Hide ready card if it was showing
+    document.getElementById('ship-placement-card').style.display = '';
+    document.getElementById('ships-ready-card').style.display = 'none';
+    renderPlacementGrid();
+    updatePlacementStatus();
+    return;
+  }
   if (idx === null) { toast('Select a ship first'); return; }
   const cfg = SHIP_CONFIGS[idx];
   const cells = getShipPreviewCells(r, c, cfg.len, placementState.horizontal);
@@ -978,21 +998,22 @@ async function sendShipsReady() {
   const btn = document.getElementById('ready-btn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span>Submitting...';
-  // Server expects exactly 3 {row,col} objects — one representative cell per ship.
-  // We send the first cell of each placed ship (ships[0..2].cells[0]).
-  const shipRepresentatives = SHIP_CONFIGS
-    .map((_, i) => placementState.ships[i])
-    .filter(s => s && s.placed && s.cells && s.cells.length > 0)
-    .map(s => ({row: s.cells[0].r, col: s.cells[0].c}));
-  if (shipRepresentatives.length < 3) {
+  // Send ALL cells of all placed ships so every cell is hittable
+  const allCells = [];
+  SHIP_CONFIGS.forEach((_, i) => {
+    const s = placementState.ships[i];
+    if (s && s.placed && s.cells) {
+      s.cells.forEach(cell => allCells.push({row: cell.r, col: cell.c}));
+    }
+  });
+  if (allCells.length < 3) {
     btn.disabled = false;
     btn.textContent = 'READY — SUBMIT SHIPS';
     toast('Place all 3 ships first!');
     return;
   }
-  // Send exactly 3
-  const payload = shipRepresentatives.slice(0, 3);
-  console.log('Placing ships:', JSON.stringify(payload));
+  const payload = allCells;
+  console.log('Placing ships (' + payload.length + ' cells):', JSON.stringify(payload));
   const r = await api('/api/games/' + currentGame.game_id + '/place', {
     method:'POST',
     body:JSON.stringify({player_id:currentUser.player_id, ships:payload})
