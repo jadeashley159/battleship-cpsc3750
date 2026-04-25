@@ -249,8 +249,8 @@ select.form-input{cursor:pointer}
         <input class="form-input" id="login-username" type="text" placeholder="your_username" autocomplete="off">
       </div>
       <div class="form-group">
-        <label class="form-label">Preferred Name (optional, stored locally)</label>
-        <input class="form-input" id="login-prefname" type="text" placeholder="Display name">
+        <label class="form-label">Password</label>
+        <input class="form-input" id="login-password" type="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()">
       </div>
       <button class="btn btn-primary btn-full" onclick="doLogin()">SIGN IN</button>
     </div>
@@ -260,7 +260,7 @@ select.form-input{cursor:pointer}
         <input class="form-input" id="reg-username" type="text" placeholder="fleet_admiral" autocomplete="off">
       </div>
       <div class="form-group">
-        <label class="form-label">Password <span style="color:var(--text-muted);font-weight:400">(stored locally)</span></label>
+        <label class="form-label">Password</label>
         <input class="form-input" id="reg-password" type="password" placeholder="••••••••">
       </div>
       <div class="form-group">
@@ -416,7 +416,7 @@ select.form-input{cursor:pointer}
         </div>
         <div class="card" id="ships-ready-card" style="display:none">
           <div style="font-size:14px;color:var(--green);font-weight:600;margin-bottom:10px">✓ Ships placed!</div>
-          <button class="btn btn-gold btn-full" id="ready-btn" onclick="sendShipsReady()" disabled>READY — WAITING FOR OTHERS</button>
+          <button class="btn btn-gold btn-full" id="ready-btn" onclick="sendShipsReady()">READY — SUBMIT SHIPS</button>
           <div style="font-size:12px;color:var(--text-muted);margin-top:8px" id="ready-status"></div>
         </div>
       </div>
@@ -546,9 +546,9 @@ const PLAYER_BG = ['rgba(231,76,60,.15)','rgba(52,152,219,.15)','rgba(155,89,182
 const SHIP_CONFIGS = [
   {name:'Patrol (2)', len:2},
   {name:'Submarine (3)', len:3},
-  {name:'Destroyer (4)', len:4},
-  {name:'Carrier (5)', len:5}
+  {name:'Destroyer (4)', len:4}
 ];
+const SHIPS_REQUIRED = 3;
 
 // ==================== UTILS ====================
 function api(path, opts={}) {
@@ -585,30 +585,28 @@ function switchLoginTab(tab) {
 }
 async function doLogin() {
   const username = document.getElementById('login-username').value.trim();
-  const prefName = document.getElementById('login-prefname').value.trim();
+  const password = document.getElementById('login-password').value;
   const alertEl = document.getElementById('login-alert');
   if (!username) { setAlert(alertEl, 'Enter your username'); return; }
-  // Try creating — if 409 it exists, if 201 it's new
+  if (!password) { setAlert(alertEl, 'Enter your password'); return; }
+  const accounts = getLocal('ns_accounts') || {};
+  const stored = accounts[username];
+  if (!stored) { setAlert(alertEl, 'No account found. Use Create Account to register.'); return; }
+  if (stored.password !== password) { setAlert(alertEl, 'Incorrect password.'); return; }
+  // Verify/sync player_id with server
   const r = await api('/api/players', {method:'POST', body:JSON.stringify({username})});
-  if (r.status === 201 || r.status === 409) {
-    const pid = r.data.player_id || r.data.playerId;
-    const accounts = getLocal('ns_accounts') || {};
-    if (r.status === 201 && !accounts[username]) {
-      setAlert(alertEl, 'No account found. Use Create Account tab.', 'error');
-      return;
-    }
-    if (r.status === 409 && !accounts[username] && !r.data.player_id) {
-      setAlert(alertEl, 'Username taken on server but no local account. Create account first.', 'error');
-      return;
-    }
-    const stored = accounts[username] || {};
-    currentUser = {player_id: pid, username, prefName: prefName || stored.prefName || username};
-    if (prefName) { accounts[username] = {...stored, prefName}; storeLocal('ns_accounts', accounts); }
-    storeLocal('ns_current', currentUser);
-    enterDashboard();
-  } else {
-    setAlert(alertEl, 'Login failed: ' + (r.data.error || r.status));
+  let pid = stored.player_id;
+  if (r.status === 201) {
+    pid = r.data.player_id || r.data.playerId;
+    accounts[username].player_id = pid;
+    storeLocal('ns_accounts', accounts);
+  } else if (r.status === 409) {
+    pid = r.data.player_id || r.data.playerId || pid;
   }
+  if (!pid) { setAlert(alertEl, 'Could not reach server. Try again.'); return; }
+  currentUser = {player_id: pid, username, prefName: stored.prefName || username};
+  storeLocal('ns_current', currentUser);
+  enterDashboard();
 }
 async function doRegister() {
   const username = document.getElementById('reg-username').value.trim();
@@ -916,11 +914,11 @@ function updatePlacementStatus() {
   const placed = SHIP_CONFIGS.filter((_,i) => placementState.ships[i] && placementState.ships[i].placed).length;
   const total = SHIP_CONFIGS.length;
   document.getElementById('placement-status').textContent = `${placed}/${total} ships placed`;
-  if (placed === total) {
+  if (placed >= SHIPS_REQUIRED) {
     document.getElementById('ship-placement-card').style.display = 'none';
     document.getElementById('ships-ready-card').style.display = '';
     document.getElementById('ready-btn').disabled = false;
-    document.getElementById('ready-status').textContent = 'Click Ready when set!';
+    document.getElementById('ready-status').textContent = 'All ships placed — click Ready!';
   }
 }
 function renderPlacementGrid() {
@@ -949,20 +947,27 @@ async function sendShipsReady() {
   const btn = document.getElementById('ready-btn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span>Submitting...';
-  // Build ship array for API — flat cells
+  // Build ship array — send all placed cells, server needs exactly 3 ship cells minimum
   const shipCells = placementState.placedShips.map(p => ({row:p.r, col:p.c}));
+  if (shipCells.length < 3) {
+    btn.disabled = false;
+    btn.textContent = 'READY — SUBMIT SHIPS';
+    toast('Place all ships first!');
+    return;
+  }
   const r = await api('/api/games/' + currentGame.game_id + '/place', {
     method:'POST',
     body:JSON.stringify({player_id:currentUser.player_id, ships:shipCells})
   });
   if (r.status === 200 || r.status === 409) {
-    btn.textContent = '✓ Ships submitted! Waiting for others...';
-    document.getElementById('ready-status').textContent = 'Waiting for all players...';
-    // Keep polling
+    btn.textContent = '✓ Waiting for others...';
+    document.getElementById('ready-status').textContent = 'Ships submitted! Game starts when all players are ready.';
   } else {
     btn.disabled = false;
-    btn.textContent = 'READY — Submit Ships';
-    toast('Error: ' + (r.data.error || r.status));
+    btn.textContent = 'READY — SUBMIT SHIPS';
+    const errMsg = r.data.error || r.status;
+    toast('Ship placement error: ' + errMsg);
+    document.getElementById('ready-status').textContent = 'Error: ' + errMsg + ' — try clearing and re-placing ships.';
   }
 }
 
