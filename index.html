@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Naval Strike — Battleship v1</title>
+<title>Naval Strike — Battleship</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -277,7 +277,7 @@ select.form-input{cursor:pointer}
   <div class="header">
     <div class="header-brand">
       <svg width="22" height="22" viewBox="0 0 22 22" fill="none"><path d="M3 15L11 5L19 15H3Z" fill="currentColor" opacity=".3"/><rect x="9" y="13" width="4" height="4" fill="currentColor"/><rect x="1" y="17" width="20" height="2" rx="1" fill="currentColor"/></svg>
-      NAVAL STRIKE
+      NAVAL STRIKE v2
     </div>
     <div class="header-nav">
       <span class="header-user" id="dash-user-label"></span>
@@ -524,7 +524,8 @@ let placementState = {
   placedShips: [], // final placed ship cells flat [{r,c}]
   selectedShip: null, // index
   horizontal: true,
-  hoverCell: null
+  hoverCell: null,
+  iSubmitted: false // true once this player has sent ships to server
 };
 let gameState = {
   myShips: [], // [{r,c}] — original placement
@@ -746,7 +747,7 @@ function switchServer() {
 // ==================== LOBBY ====================
 async function enterLobby(gid) {
   stopPolling();
-  placementState = {ships:[], placedShips:[], selectedShip:null, horizontal:true, hoverCell:null};
+  placementState = {ships:[], placedShips:[], selectedShip:null, horizontal:true, hoverCell:null, iSubmitted:false};
   showPage('page-lobby');
   document.getElementById('lobby-game-label').textContent = 'Game #' + gid;
   const shareUrl = window.location.origin + window.location.pathname + '?game=' + gid;
@@ -770,26 +771,56 @@ function buildShipToolbar() {
   buildPlacementGrid();
 }
 async function refreshLobby(gid) {
-  const pr = await api('/api/games/' + gid + '/players');
-  if (!pr.ok) return;
+  // Get game info and players in parallel
+  const [pr, gr] = await Promise.all([
+    api('/api/games/' + gid + '/players'),
+    api('/api/games/' + gid)
+  ]);
+  if (!pr.ok || !gr.ok) return;
   const players = pr.data;
+  currentGame = gr.data;
+  currentGame.game_id = gid;
+
+  const maxPlayers = currentGame.max_players || 2;
+  const joinedCount = players.length;
+  const allJoined = joinedCount >= maxPlayers;
+
+  // Check which players have submitted ships via the test board endpoint
+  // We can't directly query this, so we track who clicked ready locally
+  // and treat the game status as the source of truth for "all placed"
+  const status = currentGame.status;
+  const allShipsPlaced = (status === 'active' || status === 'playing');
+
+  // Render player list with ready indicators
   const playersDiv = document.getElementById('lobby-players');
   playersDiv.innerHTML = '';
   players.forEach((p, i) => {
+    const isMe = p.player_id === currentUser.player_id;
+    const hasPlaced = allShipsPlaced || (isMe && placementState.iSubmitted);
     const div = document.createElement('div');
     div.className = 'player-pill';
     div.style.background = PLAYER_BG[i % PLAYER_BG.length];
-    div.innerHTML = `<div class="player-dot" style="background:${PLAYER_COLORS[i%PLAYER_COLORS.length]}"></div>
-      <span style="font-weight:600">${p.username}</span>
-      <span style="color:var(--text-muted);font-size:12px;margin-left:auto">Player ${i+1}</span>`;
+    div.innerHTML = `
+      <div class="player-dot" style="background:${PLAYER_COLORS[i%PLAYER_COLORS.length]}"></div>
+      <span style="font-weight:600">${p.username}${isMe ? ' (you)' : ''}</span>
+      <span style="margin-left:auto;font-size:12px;font-weight:600;color:${hasPlaced ? 'var(--green)' : 'var(--text-muted)'}">
+        ${hasPlaced ? '✓ Ready' : 'Placing...'}
+      </span>`;
     playersDiv.appendChild(div);
   });
-  const gr = await api('/api/games/' + gid);
-  if (!gr.ok) return;
-  currentGame = gr.data;
-  currentGame.game_id = gid;
-  const status = currentGame.status;
-  if (status === 'active' || status === 'playing') {
+
+  // Update waiting status message
+  const readyStatus = document.getElementById('ready-status');
+  if (placementState.iSubmitted) {
+    if (!allJoined) {
+      readyStatus.textContent = `Waiting for ${maxPlayers - joinedCount} more player${maxPlayers - joinedCount !== 1 ? 's' : ''} to join...`;
+    } else {
+      readyStatus.textContent = 'Waiting for all players to place their ships...';
+    }
+  }
+
+  // Only enter game when server confirms all ships placed (status flips to active)
+  if (allShipsPlaced) {
     clearInterval(gameState.pollingInterval);
     toast('All ships placed! Battle begins!');
     enterGame(gid);
@@ -967,8 +998,9 @@ async function sendShipsReady() {
     body:JSON.stringify({player_id:currentUser.player_id, ships:payload})
   });
   if (r.status === 200 || r.status === 409) {
+    placementState.iSubmitted = true;
     btn.textContent = '✓ Waiting for others...';
-    document.getElementById('ready-status').textContent = 'Ships submitted! Game starts when all players are ready.';
+    document.getElementById('ready-status').textContent = 'Ships submitted! Waiting for others...';
   } else {
     btn.disabled = false;
     btn.textContent = 'READY — SUBMIT SHIPS';
@@ -1359,7 +1391,7 @@ function goToDashboard() {
   stopPolling();
   hideOutcome();
   currentGame = null;
-  placementState = {ships:[],placedShips:[],selectedShip:null,horizontal:true,hoverCell:null};
+  placementState = {ships:[],placedShips:[],selectedShip:null,horizontal:true,hoverCell:null,iSubmitted:false};
   gameState = {myShips:[],myHits:[],myMisses:[],opponentBoards:{},players:[],currentTargetId:null,isMyTurn:false,moveLog:[],pollingInterval:null,lastMoveCount:0,firingCell:null};
   enterDashboard();
 }
