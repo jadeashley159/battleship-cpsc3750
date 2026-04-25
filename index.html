@@ -407,18 +407,17 @@ select.form-input{cursor:pointer}
         </div>
         <div class="card" id="ship-placement-card">
           <div class="card-title">Place Your Ships</div>
-          <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Select a ship, then click the board to place it. Click again to rotate.</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Select a ship → click board to place. <strong>Click a placed ship to move it.</strong></div>
           <div class="ship-toolbar" id="ship-toolbar"></div>
           <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
             <button class="rotate-btn" onclick="rotateShip()">↻ Rotate</button>
             <button class="btn btn-danger btn-sm" onclick="clearShips()">Clear All</button>
           </div>
           <div id="placement-status" style="margin-top:8px;font-size:13px;color:var(--text-muted)"></div>
-        </div>
-        <div class="card" id="ships-ready-card" style="display:none">
-          <div style="font-size:14px;color:var(--green);font-weight:600;margin-bottom:10px">✓ Ships placed!</div>
-          <button class="btn btn-gold btn-full" id="ready-btn" onclick="sendShipsReady()">READY — SUBMIT SHIPS</button>
-          <div style="font-size:12px;color:var(--text-muted);margin-top:8px" id="ready-status"></div>
+          <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+            <button class="btn btn-gold btn-full" id="ready-btn" onclick="sendShipsReady()" disabled style="opacity:.4;cursor:not-allowed">ALL SHIPS PLACED!</button>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:6px;text-align:center" id="ready-status">Place all 3 ships to continue</div>
+          </div>
         </div>
       </div>
       <!-- RIGHT: placement board -->
@@ -516,7 +515,7 @@ select.form-input{cursor:pointer}
 
 <script>
 // ==================== STATE ====================
-const VERSION = 'v1.4';
+const VERSION = 'v1.5';
 const DEFAULT_SERVER = 'https://battleship-cpsc3750.onrender.com';
 let API = localStorage.getItem('ns_server') || DEFAULT_SERVER;
 let currentUser = null; // {player_id, username, prefName}
@@ -915,9 +914,8 @@ function clearShips() {
   placementState.ships = [];
   document.querySelectorAll('.ship-btn').forEach(b => b.classList.remove('placed','selected'));
   placementState.selectedShip = null;
-  document.getElementById('ship-placement-card').style.display = '';
-  document.getElementById('ships-ready-card').style.display = 'none';
   renderPlacementGrid();
+  updatePlacementStatus();
 }
 function getShipPreviewCells(r, c, len, horiz) {
   const cells = [];
@@ -953,7 +951,6 @@ function onPlacementClick(r, c) {
     // Select it so user can immediately re-place
     placementState.selectedShip = shipIdx;
     if (btn) btn.classList.add('selected');
-    // Show placement toolbar, hide ready card until all placed again
     renderPlacementGrid();
     updatePlacementStatus();
     return;
@@ -975,15 +972,22 @@ function onPlacementClick(r, c) {
 function updatePlacementStatus() {
   const placed = SHIP_CONFIGS.filter((_,i) => placementState.ships[i] && placementState.ships[i].placed).length;
   const total = SHIP_CONFIGS.length;
-  document.getElementById('placement-status').textContent = `${placed}/${total} ships placed`;
-  // Always keep ship-placement-card visible so ships can be picked up and moved
-  document.getElementById('ship-placement-card').style.display = '';
+  const btn = document.getElementById('ready-btn');
+  const statusEl = document.getElementById('placement-status');
+  const readyStatus = document.getElementById('ready-status');
+  statusEl.textContent = placed + '/' + total + ' ships placed';
   if (placed >= SHIPS_REQUIRED) {
-    document.getElementById('ships-ready-card').style.display = '';
-    document.getElementById('ready-btn').disabled = false;
-    document.getElementById('ready-status').textContent = 'All ships placed! You can still move them, or click Ready.';
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.style.cursor = 'pointer';
+    readyStatus.textContent = 'Happy with your fleet? Lock it in!';
+    readyStatus.style.color = 'var(--green)';
   } else {
-    document.getElementById('ships-ready-card').style.display = 'none';
+    btn.disabled = true;
+    btn.style.opacity = '.4';
+    btn.style.cursor = 'not-allowed';
+    readyStatus.textContent = 'Place all ' + total + ' ships to continue';
+    readyStatus.style.color = 'var(--text-muted)';
   }
 }
 function renderPlacementGrid() {
@@ -1034,8 +1038,11 @@ async function sendShipsReady() {
   });
   if (r.status === 200 || r.status === 409) {
     placementState.iSubmitted = true;
-    btn.textContent = '✓ Waiting for others...';
-    document.getElementById('ready-status').textContent = 'Ships submitted! Waiting for others...';
+    btn.textContent = '✓ SHIPS LOCKED IN!';
+    btn.disabled = true;
+    btn.style.opacity = '1';
+    document.getElementById('ready-status').textContent = 'Waiting for other players...';
+    document.getElementById('ready-status').style.color = 'var(--ocean)';
   } else {
     btn.disabled = false;
     btn.textContent = 'READY — SUBMIT SHIPS';
