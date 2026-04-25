@@ -516,7 +516,7 @@ select.form-input{cursor:pointer}
 
 <script>
 // ==================== STATE ====================
-const VERSION = 'v1.3';
+const VERSION = 'v1.4';
 const DEFAULT_SERVER = 'https://battleship-cpsc3750.onrender.com';
 let API = localStorage.getItem('ns_server') || DEFAULT_SERVER;
 let currentUser = null; // {player_id, username, prefName}
@@ -648,15 +648,25 @@ async function enterDashboard() {
   showPage('page-dashboard');
   document.getElementById('dash-user-label').textContent = currentUser.prefName || currentUser.username;
   document.getElementById('dash-version').textContent = VERSION;
+  // Check if arrived via shared game link
+  const pendingGame = sessionStorage.getItem('pending_game');
+  if (pendingGame) {
+    sessionStorage.removeItem('pending_game');
+    document.getElementById('join-game-id').value = pendingGame;
+    toast('Game #' + pendingGame + ' — click Join Game!', 5000);
+  }
   document.getElementById('current-server-badge').textContent = API;
   await loadStats();
   await loadGames();
-  // Check URL params for auto-join
+  // Check URL params — pre-fill join field, clear param from URL so it doesn't persist
   const params = new URLSearchParams(window.location.search);
   const gid = params.get('game');
   if (gid) {
     document.getElementById('join-game-id').value = gid;
-    toast(`Game ${gid} in URL — click Join!`);
+    toast('Game #' + gid + ' — click Join Game!', 5000);
+    // Remove ?game= from URL so refreshing or sharing again doesn't re-trigger
+    const cleanUrl = window.location.pathname;
+    window.history.replaceState({}, '', cleanUrl);
   }
 }
 async function loadStats() {
@@ -943,9 +953,7 @@ function onPlacementClick(r, c) {
     // Select it so user can immediately re-place
     placementState.selectedShip = shipIdx;
     if (btn) btn.classList.add('selected');
-    // Show placement toolbar again
-    document.getElementById('ship-placement-card').style.display = '';
-    document.getElementById('ships-ready-card').style.display = 'none';
+    // Show placement toolbar, hide ready card until all placed again
     renderPlacementGrid();
     updatePlacementStatus();
     return;
@@ -968,11 +976,14 @@ function updatePlacementStatus() {
   const placed = SHIP_CONFIGS.filter((_,i) => placementState.ships[i] && placementState.ships[i].placed).length;
   const total = SHIP_CONFIGS.length;
   document.getElementById('placement-status').textContent = `${placed}/${total} ships placed`;
+  // Always keep ship-placement-card visible so ships can be picked up and moved
+  document.getElementById('ship-placement-card').style.display = '';
   if (placed >= SHIPS_REQUIRED) {
-    document.getElementById('ship-placement-card').style.display = 'none';
     document.getElementById('ships-ready-card').style.display = '';
     document.getElementById('ready-btn').disabled = false;
-    document.getElementById('ready-status').textContent = 'All ships placed — click Ready!';
+    document.getElementById('ready-status').textContent = 'All ships placed! You can still move them, or click Ready.';
+  } else {
+    document.getElementById('ships-ready-card').style.display = 'none';
   }
 }
 function renderPlacementGrid() {
@@ -1448,7 +1459,17 @@ function saveProfile() {
 // ==================== INIT ====================
 window.addEventListener('load', () => {
   document.getElementById('login-version').textContent = VERSION;
-  // Try auto-login
+  const params = new URLSearchParams(window.location.search);
+  const sharedGame = params.get('game');
+  // If following a shared link, always show login so the right person signs in
+  // (don't auto-login as whoever last used this browser)
+  if (sharedGame) {
+    // Store game id to pre-fill after login
+    sessionStorage.setItem('pending_game', sharedGame);
+    window.history.replaceState({}, '', window.location.pathname);
+    return;
+  }
+  // Normal auto-login for returning users
   const saved = getLocal('ns_current');
   if (saved && saved.player_id && saved.username) {
     currentUser = saved;
