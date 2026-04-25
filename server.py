@@ -417,7 +417,7 @@ def place_ships(game_id):
     if GamePlayer.query.filter_by(game_id=gid, player_id=player_id).first() is None:
         return jsonify({"error": "player not in game"}), 403
 
-    if not isinstance(ship_list, list) or len(ship_list) != 3:
+    if not isinstance(ship_list, list) or len(ship_list) < 3:
         return jsonify({"error": "bad_request"}), 400
 
     seen = set()
