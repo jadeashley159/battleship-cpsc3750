@@ -515,7 +515,7 @@ select.form-input{cursor:pointer}
 
 <script>
 // =================== STATE ====================
-const VERSION = 'v2.1';
+const VERSION = 'v2.2';
 const DEFAULT_SERVER = 'https://battleship-cpsc3750.onrender.com';
 let API = localStorage.getItem('ns_server') || DEFAULT_SERVER;
 let currentUser = null; // {player_id, username, prefName}
@@ -1573,15 +1573,40 @@ function updateTargetSelect() {
 function renderMoveLog() {
   const logEl = document.getElementById('move-log');
   logEl.innerHTML = '';
-  // Most recent first (column-reverse on container handles visual order)
-  [...gameState.moveLog].reverse().forEach(m => {
-    const div = document.createElement('div');
+  // Build enriched log with inline sunk events inserted after the sinking hit
+  const SHIP_LENGTHS = SHIP_CONFIGS.map(s => s.len).sort((a,b) => a-b); // [2,3,4]
+  const THRESHOLDS = []; // cumulative hit counts that sink each ship: [2, 5, 9]
+  let sum = 0;
+  SHIP_LENGTHS.forEach(l => { sum += l; THRESHOLDS.push(sum); });
+  // Walk moves in chronological order tracking hits per target
+  const hitsByTarget = {};
+  const enriched = []; // {type:'move'|'sunk', ...}
+  gameState.moveLog.forEach(m => {
+    enriched.push({type:'move', ...m});
     if (m.result === 'hit') {
+      const key = m.targetId || m.target;
+      hitsByTarget[key] = (hitsByTarget[key] || 0) + 1;
+      const count = hitsByTarget[key];
+      const threshIdx = THRESHOLDS.indexOf(count);
+      if (threshIdx !== -1) {
+        const shipName = SHIP_CONFIGS[threshIdx] ? SHIP_CONFIGS[threshIdx].name.split(' ')[0] : 'Ship';
+        enriched.push({type:'sunk', shooter:m.shooter, target:m.target, shipName, shipLen:SHIP_LENGTHS[threshIdx]});
+      }
+    }
+  });
+  // Render most recent first
+  [...enriched].reverse().forEach(e => {
+    const div = document.createElement('div');
+    if (e.type === 'sunk') {
+      div.className = 'move-entry sunk-entry';
+      div.style.cssText = 'font-weight:700;background:#fadbd8;color:var(--red)';
+      div.textContent = '🚢 ' + e.shooter + ' sunk ' + e.target + "'s " + e.shipName + ' [' + e.shipLen + ']';
+    } else if (e.result === 'hit') {
       div.className = 'move-entry hit-entry';
-      div.textContent = '💥 ' + m.shooter + ' → ' + m.target + ' [' + coordLabel(m.r, m.c) + '] HIT';
+      div.textContent = '💥 ' + e.shooter + ' → ' + e.target + ' [' + coordLabel(e.r, e.c) + '] HIT';
     } else {
       div.className = 'move-entry miss-entry';
-      div.textContent = '💧 ' + m.shooter + ' → ' + m.target + ' [' + coordLabel(m.r, m.c) + '] MISS';
+      div.textContent = '💧 ' + e.shooter + ' → ' + e.target + ' [' + coordLabel(e.r, e.c) + '] MISS';
     }
     logEl.appendChild(div);
   });
