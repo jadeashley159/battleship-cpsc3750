@@ -340,7 +340,7 @@ select.form-input{cursor:pointer}
           <div class="form-group">
             <label class="form-label">Team Server</label>
             <select class="form-input" id="server-select" onchange="switchServer()">
-              <option value="https://battleship-cpsc3750.onrender.com">Team0x11 (Your Server)</option>
+              <option value="https://battleship-cpsc3750.onrender.com">Team0x11 — Ayden Sabol, Jade Ashley</option>
               <option value="https://battleship-server-18q1.onrender.com">Team0x00 — Shrayas Raju</option>
               <option value="https://battleship.koon.us">Team0x01 — Max Koon, Parker Estes</option>
               <option value="https://finalproject-virusoutbreak-3bwa.onrender.com">Team0x02 — Mir Patel, St Angelo Davis</option>
@@ -517,7 +517,7 @@ select.form-input{cursor:pointer}
 
 <script>
 // ==================== STATE ====================
-const VERSION = 'v1.6';
+const VERSION = 'v1.7';
 const DEFAULT_SERVER = 'https://battleship-cpsc3750.onrender.com';
 let API = localStorage.getItem('ns_server') || DEFAULT_SERVER;
 let currentUser = null; // {player_id, username, prefName}
@@ -595,20 +595,37 @@ async function doLogin() {
   if (!password) { setAlert(alertEl, 'Enter your password'); return; }
   const accounts = getLocal('ns_accounts') || {};
   const stored = accounts[username];
-  if (!stored) { setAlert(alertEl, 'No account found. Use Create Account to register.'); return; }
-  if (stored.password !== password) { setAlert(alertEl, 'Incorrect password.'); return; }
-  // Verify/sync player_id with server
-  const r = await api('/api/players', {method:'POST', body:JSON.stringify({username})});
-  let pid = stored.player_id;
-  if (r.status === 201) {
-    pid = r.data.player_id || r.data.playerId;
-    accounts[username].player_id = pid;
-    storeLocal('ns_accounts', accounts);
-  } else if (r.status === 409) {
-    pid = r.data.player_id || r.data.playerId || pid;
+  // If we have a local account, verify password
+  if (stored && stored.password && stored.password !== password) {
+    setAlert(alertEl, 'Incorrect password.');
+    return;
   }
-  if (!pid) { setAlert(alertEl, 'Could not reach server. Try again.'); return; }
-  currentUser = {player_id: pid, username, prefName: stored.prefName || username};
+  // Check server — try to create (201 = new user, shouldn't login without registering)
+  // or get existing (409 = exists on server)
+  const r = await api('/api/players', {method:'POST', body:JSON.stringify({username})});
+  let pid = stored ? stored.player_id : null;
+  if (r.status === 409) {
+    // User exists on server — allow login, sync player_id
+    pid = r.data.player_id || r.data.playerId || pid;
+    if (!pid) {
+      // Server returned 409 but no player_id — look up via stats endpoint not available directly
+      // Store what we have and proceed; player_id will sync on next action
+      setAlert(alertEl, 'Account exists but could not get player ID. Try Create Account first.');
+      return;
+    }
+    // Save/update local account with this device's password
+    accounts[username] = {password, prefName: (stored && stored.prefName) || username, player_id: pid};
+    storeLocal('ns_accounts', accounts);
+  } else if (r.status === 201) {
+    // Username didn't exist on server — they need to register, not login
+    // Clean up the player we just accidentally created
+    setAlert(alertEl, 'No account found for "' + username + '". Use Create Account to register.');
+    return;
+  } else {
+    setAlert(alertEl, 'Server error. Try again.');
+    return;
+  }
+  currentUser = {player_id: pid, username, prefName: (stored && stored.prefName) || username};
   storeLocal('ns_current', currentUser);
   enterDashboard();
 }
@@ -621,20 +638,28 @@ async function doRegister() {
   if (!password) { setAlert(alertEl, 'Password required'); return; }
   if (!/^[A-Za-z0-9_]+$/.test(username)) { setAlert(alertEl, 'Username: letters, numbers, underscores only'); return; }
   const r = await api('/api/players', {method:'POST', body:JSON.stringify({username})});
+  let pid = null;
   if (r.status === 201) {
-    const pid = r.data.player_id || r.data.playerId;
-    const accounts = getLocal('ns_accounts') || {};
-    accounts[username] = {password, prefName: prefName || username, player_id: pid};
-    storeLocal('ns_accounts', accounts);
-    currentUser = {player_id: pid, username, prefName: prefName || username};
-    storeLocal('ns_current', currentUser);
-    toast('Account created!');
-    enterDashboard();
+    pid = r.data.player_id || r.data.playerId;
   } else if (r.status === 409) {
-    setAlert(alertEl, 'Username already taken on server. Try a different one.');
+    // Username exists on server — let them claim it on this device with their password
+    pid = r.data.player_id || r.data.playerId;
+    if (!pid) {
+      setAlert(alertEl, 'Username taken. If this is your account, use Sign In.');
+      return;
+    }
+    toast('Username exists — account linked to this device!');
   } else {
     setAlert(alertEl, r.data.error || 'Registration failed');
+    return;
   }
+  const accounts = getLocal('ns_accounts') || {};
+  accounts[username] = {password, prefName: prefName || username, player_id: pid};
+  storeLocal('ns_accounts', accounts);
+  currentUser = {player_id: pid, username, prefName: prefName || username};
+  storeLocal('ns_current', currentUser);
+  if (r.status === 201) toast('Account created! Welcome aboard.');
+  enterDashboard();
 }
 function doLogout() {
   stopPolling();
@@ -727,23 +752,25 @@ async function joinGame() {
   await openGame(gid);
 }
 async function openGame(gid) {
-  // Check game state
   const gr = await api('/api/games/' + gid);
   if (!gr.ok) { toast('Game not found'); return; }
   currentGame = gr.data;
   currentGame.game_id = currentGame.game_id || gid;
   const status = currentGame.status;
-  // Try joining if waiting_setup
-  if (status === 'waiting_setup') {
+  // Check if already in this game
+  const playersR = await api('/api/games/' + gid + '/players');
+  const alreadyIn = playersR.ok && playersR.data.some(p => p.player_id === currentUser.player_id);
+  // Try joining if game is waiting_setup and not already in it
+  if (status === 'waiting_setup' && !alreadyIn) {
     const jr = await api('/api/games/' + gid + '/join', {method:'POST', body:JSON.stringify({player_id:currentUser.player_id})});
-    // 409/200 are both fine (already joined or just joined)
     if (jr.status !== 200 && jr.status !== 409) {
       if (jr.status === 400) toast('Game is full');
       else toast('Cannot join: ' + (jr.data.error || jr.status));
       return;
     }
   }
-  if (status === 'waiting_setup') {
+  // Go to lobby if game is still in setup phase, or if we haven't placed ships yet
+  if (status === 'waiting_setup' || (alreadyIn && !placementState.iSubmitted && status !== 'finished')) {
     enterLobby(gid);
   } else {
     enterGame(gid);
@@ -1075,6 +1102,7 @@ async function enterGame(gid) {
   gameState.myMisses = [];
   gameState.opponentBoards = {};
   gameState.moveLog = [];
+  gameState.sunkEvents = {};
   gameState.lastMoveCount = 0;
   // Init opponent boards
   const opponents = gameState.players.filter(p => p.player_id !== currentUser.player_id);
@@ -1220,27 +1248,37 @@ function renderOpponentBoard() {
   const tid = gameState.currentTargetId;
   const board = gameState.opponentBoards[tid] || {hits:[],misses:[]};
   const myIdx = gameState.players.findIndex(p => p.player_id === currentUser.player_id);
+  const canFire = gameState.isMyTurn && (gameState.currentTargetId === tid);
   gridArea.querySelectorAll('.grid-cell').forEach(cell => {
     const r = parseInt(cell.dataset.r), c = parseInt(cell.dataset.c);
     cell.className = 'grid-cell';
-    cell.style.cursor = gameState.isMyTurn ? 'crosshair' : 'default';
     cell.innerHTML = '';
-    const isHit = board.hits.some(h => h.r===r && h.c===c);
-    const isMiss = board.misses.some(m => m.r===r && m.c===c);
-    if (isHit) {
+    const hitEntry = board.hits.find(h => h.r===r && h.c===c);
+    const missEntry = board.misses.find(m => m.r===r && m.c===c);
+    if (hitEntry) {
       cell.classList.add('hit');
-      cell.dataset.hitter = myIdx;
+      // Use the actual shooter's color, not always "me"
+      const hIdx = hitEntry.shooterIdx !== undefined ? hitEntry.shooterIdx : myIdx;
+      cell.dataset.hitter = hIdx;
+      const color = PLAYER_COLORS[hIdx % PLAYER_COLORS.length];
       const xEl = document.createElement('div');
       xEl.className = 'hit-x';
-      xEl.innerHTML = `<svg width="60%" height="60%" viewBox="0 0 20 20"><line x1="2" y1="2" x2="18" y2="18" stroke="${PLAYER_COLORS[myIdx%PLAYER_COLORS.length]}" stroke-width="3" stroke-linecap="round"/><line x1="18" y1="2" x2="2" y2="18" stroke="${PLAYER_COLORS[myIdx%PLAYER_COLORS.length]}" stroke-width="3" stroke-linecap="round"/></svg>`;
+      xEl.innerHTML = `<svg width="60%" height="60%" viewBox="0 0 20 20"><line x1="2" y1="2" x2="18" y2="18" stroke="${color}" stroke-width="3" stroke-linecap="round"/><line x1="18" y1="2" x2="2" y2="18" stroke="${color}" stroke-width="3" stroke-linecap="round"/></svg>`;
       cell.appendChild(xEl);
       cell.style.cursor = 'default';
-    } else if (isMiss) {
+    } else if (missEntry) {
       cell.classList.add('miss');
       const dot = document.createElement('div');
       dot.className = 'miss-dot';
+      // Tint the miss dot with the shooter's color subtly
+      const mIdx = missEntry.shooterIdx !== undefined ? missEntry.shooterIdx : myIdx;
+      dot.style.background = PLAYER_COLORS[mIdx % PLAYER_COLORS.length];
+      dot.style.opacity = '0.4';
       cell.appendChild(dot);
       cell.style.cursor = 'default';
+    } else {
+      // Only clickable if it's my turn AND this is the board I'm targeting
+      cell.style.cursor = canFire ? 'crosshair' : 'default';
     }
     // Firing animation
     if (gameState.firingCell && gameState.firingCell.r===r && gameState.firingCell.c===c) {
@@ -1254,7 +1292,11 @@ async function onFire(r, c) {
   if (!tid) { toast('No target selected'); return; }
   const board = gameState.opponentBoards[tid] || {hits:[],misses:[]};
   if (board.hits.some(h=>h.r===r&&h.c===c) || board.misses.some(m=>m.r===r&&m.c===c)) {
-    toast('Already fired here!'); return;
+    // Check if it was me or someone else
+    const hitByMe = board.hits.some(h=>h.r===r&&h.c===c&&h.shooterId===currentUser.player_id);
+    const missedByMe = board.misses.some(m=>m.r===r&&m.c===c&&m.shooterId===currentUser.player_id);
+    if (hitByMe || missedByMe) { toast('You already fired here!'); return; }
+    toast('Another player already fired here — pick a different cell!'); return;
   }
   // Optimistic: show firing state
   gameState.firingCell = {r, c};
@@ -1268,8 +1310,16 @@ async function onFire(r, c) {
   });
   gameState.firingCell = null;
   if (!res.ok) {
-    gameState.isMyTurn = prevTurn;
-    toast('Fire error: ' + (res.data.error || res.status));
+    if (res.status === 409) {
+      // Already hit by another player — still counts, just show info
+      toast('That cell was already hit by another player!');
+      // Refresh board state from server
+      await loadMoves(currentGame.game_id);
+      gameState.isMyTurn = false; // forfeit this shot
+    } else {
+      gameState.isMyTurn = prevTurn;
+      toast('Fire error: ' + (res.data.error || res.status));
+    }
     renderOpponentBoard();
     updateTurnUI();
     return;
@@ -1281,7 +1331,21 @@ async function onFire(r, c) {
   if (!gameState.opponentBoards[tid]) gameState.opponentBoards[tid] = {hits:[],misses:[]};
   if (result === 'hit') {
     gameState.opponentBoards[tid].hits.push({r, c});
-    toast('💥 HIT! ' + coordLabel(r,c));
+    // Check if this hit sank a ship (cumulative hit threshold)
+    const targetPlayer = gameState.players.find(p => p.player_id === tid);
+    const tName = targetPlayer ? targetPlayer.username : 'opponent';
+    const prevHitCount = (gameState.opponentBoards[tid].hits.length - 1);
+    const THRESHOLDS = [2, 5, 9]; // cumulative: patrol=2, +sub=5, +destroyer=9
+    const nowCount = gameState.opponentBoards[tid].hits.length;
+    const justSunk = THRESHOLDS.find(t => nowCount === t);
+    if (justSunk) {
+      const shipIdx = THRESHOLDS.indexOf(justSunk);
+      const shipName = SHIP_CONFIGS[shipIdx] ? SHIP_CONFIGS[shipIdx].name : 'Ship';
+      document.getElementById('game-status-msg').textContent = '🚢 YOU SUNK ' + tName.toUpperCase() + "'S " + shipName.toUpperCase() + '!';
+      toast('🚢 SUNK! ' + tName + "'s " + shipName, 4000);
+    } else {
+      toast('💥 HIT! ' + coordLabel(r,c));
+    }
   } else {
     gameState.opponentBoards[tid].misses.push({r, c});
     toast('💧 Miss at ' + coordLabel(r,c));
@@ -1352,17 +1416,26 @@ async function loadMoves(gid, moves) {
       // Someone shot at me
       if (result === 'hit') gameState.myHits.push({r, c, hitter_idx:shooterIdx});
       else gameState.myMisses.push({r, c});
-    } else if (shooterId === currentUser.player_id) {
-      // I shot at someone
+    } else {
+      // Any player shot at an opponent — track it on that opponent's board
+      // so all players can see the full picture when viewing any board
       if (!gameState.opponentBoards[targetId]) gameState.opponentBoards[targetId] = {hits:[],misses:[]};
-      if (result === 'hit') gameState.opponentBoards[targetId].hits.push({r, c});
-      else gameState.opponentBoards[targetId].misses.push({r, c});
+      if (result === 'hit') {
+        // Store who fired the shot so we can color the X correctly
+        gameState.opponentBoards[targetId].hits.push({r, c, shooterIdx, shooterId});
+      } else {
+        gameState.opponentBoards[targetId].misses.push({r, c, shooterIdx, shooterId});
+      }
     }
     // Add to log
     const sName = shooterPlayer ? shooterPlayer.username : shooterId;
     const tName = targetPlayer ? targetPlayer.username : targetId;
-    gameState.moveLog.push({shooter:sName, target:tName, r, c, result, shooterIdx});
+    gameState.moveLog.push({shooter:sName, target:tName, r, c, result, shooterIdx, shooterId, targetId});
   });
+  // Detect sunk ships: for each opponent, check if all their hits form a contiguous group
+  // Simple approach: check if any opponent has no remaining unhit cells adjacent to hits
+  // We mark sunk in the move log by checking consecutive hits on same target
+  detectSunkShips();
   renderMoveLog();
   // Determine whose turn it is from server's current_turn_index
   if (currentGame) {
@@ -1380,15 +1453,72 @@ async function loadMoves(gid, moves) {
   }
   updateTurnUI();
 }
+function detectSunkShips() {
+  // For each player, group consecutive hits by target.
+  // A "sunk" event is when hits on a target reach a ship-length boundary (2,3,4 consecutive).
+  // Simple heuristic: mark a sunk event after every SHIP_CONFIGS[n].len hits on same target.
+  const SHIP_LENGTHS = SHIP_CONFIGS.map(s => s.len).sort((a,b)=>a-b); // [2,3,4]
+  const hitsByTarget = {};
+  gameState.moveLog.forEach(m => {
+    if (m.result === 'hit') {
+      const key = m.targetId || m.target;
+      if (!hitsByTarget[key]) hitsByTarget[key] = [];
+      hitsByTarget[key].push(m);
+    }
+  });
+  // Mark sunk events: at hit counts matching cumulative ship lengths
+  gameState.sunkEvents = gameState.sunkEvents || {};
+  Object.entries(hitsByTarget).forEach(([tid, hits]) => {
+    const thresholds = [];
+    let sum = 0;
+    SHIP_LENGTHS.forEach(l => { sum += l; thresholds.push(sum); });
+    thresholds.forEach((thresh, i) => {
+      const key = tid + '_' + thresh;
+      if (hits.length >= thresh && !gameState.sunkEvents[key]) {
+        gameState.sunkEvents[key] = {
+          target: hits[thresh-1].target,
+          shooter: hits[thresh-1].shooter,
+          shipName: SHIP_CONFIGS[i] ? SHIP_CONFIGS[i].name : 'Ship'
+        };
+      }
+    });
+  });
+}
 function renderMoveLog() {
   const logEl = document.getElementById('move-log');
   logEl.innerHTML = '';
+  const sunkKeys = Object.keys(gameState.sunkEvents || {});
+  // Build a combined timeline
+  const entries = [...gameState.moveLog].map(m => ({...m, type:'move'}));
   [...gameState.moveLog].reverse().forEach(m => {
     const div = document.createElement('div');
-    div.className = 'move-entry ' + (m.result==='hit'?'hit-entry':'miss-entry');
-    div.textContent = `${m.shooter} → ${m.target} [${coordLabel(m.r,m.c)}] ${m.result.toUpperCase()}`;
+    let cls = 'move-entry ';
+    let txt = '';
+    if (m.result === 'hit') {
+      cls += 'hit-entry';
+      txt = `💥 ${m.shooter} → ${m.target} [${coordLabel(m.r,m.c)}] HIT`;
+    } else {
+      cls += 'miss-entry';
+      txt = `💧 ${m.shooter} → ${m.target} [${coordLabel(m.r,m.c)}] MISS`;
+    }
+    div.className = cls;
+    div.textContent = txt;
     logEl.appendChild(div);
   });
+  // Inject sunk events at top
+  if (sunkKeys.length > 0) {
+    const sunkDiv = document.createElement('div');
+    sunkDiv.style.cssText = 'border-bottom:1px solid var(--border);margin-bottom:6px;padding-bottom:6px';
+    sunkKeys.forEach(k => {
+      const ev = gameState.sunkEvents[k];
+      const d = document.createElement('div');
+      d.className = 'move-entry sunk-entry';
+      d.style.cssText = 'font-size:13px;font-weight:700;background:#fadbd8;color:var(--red);padding:6px 8px;border-radius:4px;margin-bottom:3px';
+      d.textContent = '🚢 ' + ev.shooter + ' SUNK ' + ev.target + "'s " + ev.shipName + '!';
+      sunkDiv.appendChild(d);
+    });
+    logEl.insertBefore(sunkDiv, logEl.firstChild);
+  }
 }
 function addMoveLog(shooter, target, r, c, result) {
   gameState.moveLog.push({shooter, target, r, c, result});
