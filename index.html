@@ -514,8 +514,8 @@ select.form-input{cursor:pointer}
 <div id="toast"></div>
 
 <script>
-// ==================== STATE ====================
-const VERSION = 'v2.0';
+// =================== STATE ====================
+const VERSION = 'v2.1';
 const DEFAULT_SERVER = 'https://battleship-cpsc3750.onrender.com';
 let API = localStorage.getItem('ns_server') || DEFAULT_SERVER;
 let currentUser = null; // {player_id, username, prefName}
@@ -557,7 +557,14 @@ function api(path, opts={}) {
   return fetch(API + path, {
     headers:{'Content-Type':'application/json'},
     ...opts
-  }).then(r => r.json().then(d => ({ok:r.ok,status:r.status,data:d})));
+  })
+  .then(r => r.json().then(d => ({ok:r.ok, status:r.status, data:d}))
+             .catch(() => ({ok:r.ok, status:r.status, data:{}})))
+  .catch(err => {
+    // Network error, CORS block, server unreachable
+    console.warn('API error:', API + path, err.message);
+    return {ok:false, status:0, data:{error: 'network_error'}, networkError:true};
+  });
 }
 function toast(msg, dur=3000) {
   const t = document.getElementById('toast');
@@ -696,7 +703,7 @@ async function enterDashboard() {
 async function loadStats() {
   if (!currentUser) return;
   const r = await api('/api/players/' + currentUser.player_id + '/stats');
-  if (!r.ok) return;
+  if (!r.ok || r.networkError) return;
   const d = r.data;
   document.getElementById('stat-played').textContent = d.games_played || d.games || 0;
   document.getElementById('stat-wins').textContent = d.wins || 0;
@@ -711,10 +718,16 @@ async function loadGames() {
   sp.style.display = 'inline-block';
   const r = await api('/api/games');
   sp.style.display = 'none';
-  if (!r.ok) { toast('Could not load games'); return; }
-  const games = r.data;
   const list = document.getElementById('game-list');
-  if (!games.length) { list.innerHTML = '<div style="color:var(--text-muted);font-size:14px;padding:10px 0">No active games. Create one!</div>'; return; }
+  if (!r.ok) {
+    const msg = r.networkError
+      ? 'Cannot reach ' + API + ' — CORS or server offline. Try your own server.'
+      : 'Could not load games from this server.';
+    list.innerHTML = '<div style="color:var(--red);font-size:13px;padding:10px 0">⚠️ ' + msg + '</div>';
+    return;
+  }
+  const games = r.data;
+  if (!Array.isArray(games) || !games.length) { list.innerHTML = '<div style="color:var(--text-muted);font-size:14px;padding:10px 0">No active games. Create one!</div>'; return; }
   list.innerHTML = '';
   games.forEach(g => {
     const status = g.status || 'waiting_setup';
@@ -779,7 +792,10 @@ function switchServer() {
   API = sel.value;
   localStorage.setItem('ns_server', API);
   document.getElementById('current-server-badge').textContent = API;
-  toast('Switched to ' + API);
+  // Clear stats since they're per-server
+  ['stat-played','stat-wins','stat-shots','stat-hits'].forEach(id => document.getElementById(id).textContent = '—');
+  document.getElementById('stat-acc').textContent = '—';
+  toast('Switched to ' + API, 2000);
   loadGames();
 }
 
@@ -1123,6 +1139,7 @@ async function enterGame(gid) {
     sessionStorage.setItem('ns_myships_' + gid, JSON.stringify(placementState.placedShips));
   }
   gameState.myShips = savedShips;
+  gameState.eliminatedPlayers = gameState.eliminatedPlayers || {};
   gameState.myHits = [];
   gameState.myMisses = [];
   gameState.opponentBoards = {};
@@ -1277,7 +1294,20 @@ function renderOpponentBoard() {
   const tid = gameState.currentTargetId;
   const board = gameState.opponentBoards[tid] || {hits:[],misses:[]};
   const myIdx = gameState.players.findIndex(p => p.player_id === currentUser.player_id);
-  const canFire = gameState.isMyTurn && (gameState.currentTargetId === tid);
+  const isEliminated = gameState.eliminatedPlayers && gameState.eliminatedPlayers[tid];
+  const canFire = gameState.isMyTurn && (gameState.currentTargetId === tid) && !isEliminated;
+  // Show eliminated overlay on board
+  const gridContainer = gridArea.closest('.board-card, .card') || gridArea.parentElement;
+  // Add/remove eliminated badge on board header
+  const existingBadge = document.getElementById('elim-badge-' + tid);
+  if (isEliminated && !existingBadge) {
+    const badge = document.createElement('div');
+    badge.id = 'elim-badge-' + tid;
+    badge.style.cssText = 'position:absolute;inset:0;background:rgba(255,255,255,.7);display:flex;align-items:center;justify-content:center;border-radius:4px;z-index:2;pointer-events:none';
+    badge.innerHTML = '<div style="font-family:Bebas Neue,sans-serif;font-size:28px;color:var(--red);letter-spacing:3px;transform:rotate(-15deg)">ELIMINATED</div>';
+    gridArea.style.position = 'relative';
+    gridArea.appendChild(badge);
+  }
   gridArea.querySelectorAll('.grid-cell').forEach(cell => {
     const r = parseInt(cell.dataset.r), c = parseInt(cell.dataset.c);
     cell.className = 'grid-cell';
@@ -1373,7 +1403,8 @@ async function onFire(r, c) {
   // Check if my turn continues (hit = keep going)
   if (gameStatus === 'finished') {
     renderGameBoards();
-    showOutcome(true, res.data.winner_id);
+    const winnerId = res.data.winner_id;
+    showOutcome(winnerId === currentUser.player_id, winnerId);
     return;
   }
   gameState.isMyTurn = (nextPid === currentUser.player_id);
@@ -1397,11 +1428,11 @@ async function pollGame(gid) {
   updateTurnUI();
   if (currentGame.status === 'finished') {
     stopPolling();
-    // Check if we won or lost
+    // Winner is the last player who fired (last move's player_id)
     const lastMove = moves[moves.length - 1];
-    if (lastMove) {
-      const iWon = lastMove.player_id === currentUser.player_id;
-      showOutcome(iWon, iWon ? currentUser.player_id : lastMove.player_id);
+    if (lastMove && !document.getElementById('outcome-overlay').classList.contains('show')) {
+      const winnerId = lastMove.player_id;
+      showOutcome(winnerId === currentUser.player_id, winnerId);
     }
   }
 }
@@ -1457,6 +1488,7 @@ async function loadMoves(gid, moves) {
   // Simple approach: check if any opponent has no remaining unhit cells adjacent to hits
   // We mark sunk in the move log by checking consecutive hits on same target
   detectSunkShips();
+  checkEliminations();
   renderMoveLog();
   // Determine whose turn it is from server's current_turn_index
   if (currentGame) {
@@ -1475,7 +1507,68 @@ async function loadMoves(gid, moves) {
   updateTurnUI();
 }
 function detectSunkShips() {
-  // no-op — sunk detection removed per user request
+  // no-op
+}
+function checkEliminations() {
+  // Total ship cells per player = sum of all ship lengths
+  const totalShipCells = SHIP_CONFIGS.reduce((s, c) => s + c.len, 0); // 2+3+4 = 9
+  const opponents = gameState.players.filter(p => p.player_id !== currentUser.player_id);
+  opponents.forEach(op => {
+    if (gameState.eliminatedPlayers[op.player_id]) return; // already handled
+    const board = gameState.opponentBoards[op.player_id];
+    if (!board) return;
+    const hitCount = board.hits.length;
+    if (hitCount >= totalShipCells) {
+      gameState.eliminatedPlayers[op.player_id] = true;
+      // Toast + status bar announcement
+      const opName = op.username;
+      toast('🚢 All of ' + opName + "'s ships are sunk!", 5000);
+      document.getElementById('game-status-msg').textContent = '🚢 ' + opName.toUpperCase() + ' ELIMINATED!';
+      // If we are currently viewing that player's board, auto-switch to next alive opponent
+      if (gameState.currentTargetId === op.player_id) {
+        const nextTarget = opponents.find(o => !gameState.eliminatedPlayers[o.player_id]);
+        if (nextTarget) {
+          gameState.currentTargetId = nextTarget.player_id;
+          document.getElementById('target-select').value = nextTarget.player_id;
+          toast('Switched target to ' + nextTarget.username, 3000);
+        }
+      }
+      // Update target dropdown — gray out eliminated players
+      updateTargetSelect();
+    }
+  });
+  // Check if I am eliminated (all my ships hit)
+  if (!gameState.iEliminated) {
+    const myHitCount = gameState.myHits.length;
+    if (myHitCount >= totalShipCells) {
+      gameState.iEliminated = true;
+      // Show defeat overlay immediately if game isn't finished yet (still playing)
+      if (currentGame && currentGame.status !== 'finished') {
+        showOutcome(false, null, true); // eliminated mid-game
+      }
+    }
+  }
+}
+function updateTargetSelect() {
+  const ts = document.getElementById('target-select');
+  if (!ts) return;
+  Array.from(ts.options).forEach(opt => {
+    const pid = parseInt(opt.value);
+    if (gameState.eliminatedPlayers[pid]) {
+      opt.text = opt.text.replace(' ☠', '') + ' ☠'; // add skull if not already there
+      opt.disabled = true;
+      opt.style.color = 'var(--text-muted)';
+    }
+  });
+  // If current selection is eliminated, switch to first alive
+  const currentOpt = ts.options[ts.selectedIndex];
+  if (currentOpt && currentOpt.disabled) {
+    const aliveOpt = Array.from(ts.options).find(o => !o.disabled);
+    if (aliveOpt) {
+      ts.value = aliveOpt.value;
+      gameState.currentTargetId = parseInt(aliveOpt.value);
+    }
+  }
 }
 function renderMoveLog() {
   const logEl = document.getElementById('move-log');
@@ -1530,11 +1623,22 @@ function updateStatusBar(result, nextPid) {
     document.getElementById('game-status-msg').textContent = isMyTurn ? 'YOUR TURN — FIRE!' : nextName.toUpperCase() + "'S TURN";
   }
 }
-function showOutcome(isWinner, winner_id) {
-  stopPolling();
+function showOutcome(isWinner, winner_id, eliminatedMidGame=false) {
   const overlay = document.getElementById('outcome-overlay');
   const title = document.getElementById('outcome-title');
   const sub = document.getElementById('outcome-sub');
+  if (eliminatedMidGame) {
+    // Eliminated but game continues — show defeat but allow dismissing to watch
+    stopPolling(); // stop for eliminated player — they just spectate
+    title.textContent = 'DEFEATED';
+    title.className = 'outcome-title defeat';
+    sub.textContent = 'All your ships have been sunk. Watch the remaining battle or return to the fleet.';
+    // Change "View Boards" button to "Spectate"
+    overlay.querySelector('.btn-secondary').textContent = 'Spectate';
+    overlay.classList.add('show');
+    return;
+  }
+  stopPolling();
   if (isWinner || winner_id === currentUser.player_id) {
     title.textContent = 'VICTORY!';
     title.className = 'outcome-title victory';
@@ -1568,7 +1672,7 @@ function goToDashboard() {
   hideOutcome();
   currentGame = null;
   placementState = {ships:[],placedShips:[],selectedShip:null,horizontal:true,hoverCell:null,iSubmitted:false};
-  gameState = {myShips:[],myHits:[],myMisses:[],opponentBoards:{},players:[],currentTargetId:null,isMyTurn:false,moveLog:[],pollingInterval:null,lastMoveCount:0,firingCell:null};
+  gameState = {myShips:[],myHits:[],myMisses:[],opponentBoards:{},players:[],currentTargetId:null,isMyTurn:false,moveLog:[],sunkEvents:{},eliminatedPlayers:{},pollingInterval:null,lastMoveCount:0,firingCell:null};
   enterDashboard();
 }
 
