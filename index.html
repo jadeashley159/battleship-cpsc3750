@@ -171,7 +171,7 @@ select.form-input{cursor:pointer}
 .grid-cell.hit[data-hitter="3"]::before{content:'';position:absolute;inset:0;background:rgba(230,126,34,.3)}
 
 /* ======================== GAME PAGE ======================== */
-#page-game .content-inner{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto 1fr;gap:1rem;height:calc(100vh - 60px - 2rem)}
+#page-game .content-inner{display:grid;grid-template-columns:1fr 1fr 260px;grid-template-rows:auto 1fr;gap:1rem;height:calc(100vh - 60px - 2rem)}
 .game-status-bar{grid-column:1/-1;background:var(--navy);color:white;padding:10px 20px;border-radius:var(--radius-lg);display:flex;align-items:center;justify-content:space-between}
 .status-msg{font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:2px;color:var(--gold-light)}
 .status-turn{font-size:13px;color:var(--foam-dark)}
@@ -417,7 +417,7 @@ select.form-input{cursor:pointer}
           <div id="placement-status" style="margin-top:8px;font-size:13px;color:var(--text-muted)"></div>
           <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
             <button class="btn btn-gold btn-full" id="ready-btn" onclick="sendShipsReady()" disabled style="opacity:.4;cursor:not-allowed">ALL SHIPS PLACED!</button>
-            <div style="font-size:12px;color:var(--text-muted);margin-top:6px;text-align:center" id="ready-status">Place all 3 ships to continue</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:6px;text-align:center" id="ready-status"></div>
           </div>
         </div>
       </div>
@@ -470,11 +470,9 @@ select.form-input{cursor:pointer}
         <div id="opponent-grid" style="flex:1;min-height:0;display:flex;align-items:stretch"></div>
       </div>
       <!-- MOVE LOG -->
-      <div class="board-card card" id="move-log-wrap" style="overflow:hidden;display:flex;flex-direction:column">
-        <div class="board-card-title">Move Log</div>
-        <div class="move-log">
-          <div class="move-log-inner" id="move-log"></div>
-        </div>
+      <div class="board-card card" id="move-log-wrap" style="overflow:hidden;display:flex;flex-direction:column;grid-row:2;grid-column:3">
+        <div class="board-card-title" style="margin-bottom:6px">Move Log</div>
+        <div style="flex:1;overflow-y:auto;display:flex;flex-direction:column-reverse;gap:3px" id="move-log"></div>
       </div>
     </div>
   </div>
@@ -517,7 +515,7 @@ select.form-input{cursor:pointer}
 
 <script>
 // ==================== STATE ====================
-const VERSION = 'v1.7';
+const VERSION = 'v2.0';
 const DEFAULT_SERVER = 'https://battleship-cpsc3750.onrender.com';
 let API = localStorage.getItem('ns_server') || DEFAULT_SERVER;
 let currentUser = null; // {player_id, username, prefName}
@@ -825,6 +823,7 @@ async function refreshLobby(gid) {
   const maxPlayers = currentGame.max_players || 2;
   const joinedCount = players.length;
   const allJoined = joinedCount >= maxPlayers;
+  document.__lobbyJoinedCount = joinedCount; // share with updatePlacementStatus
 
   // Check which players have submitted ships via the test board endpoint
   // We can't directly query this, so we track who clicked ready locally
@@ -850,11 +849,20 @@ async function refreshLobby(gid) {
     playersDiv.appendChild(div);
   });
 
-  // Update waiting status message
+  // Block the ready button until enough players have joined
+  const readyBtn = document.getElementById('ready-btn');
   const readyStatus = document.getElementById('ready-status');
-  if (placementState.iSubmitted) {
+  if (!placementState.iSubmitted) {
     if (!allJoined) {
-      readyStatus.textContent = `Waiting for ${maxPlayers - joinedCount} more player${maxPlayers - joinedCount !== 1 ? 's' : ''} to join...`;
+      readyBtn.disabled = true;
+      readyBtn.style.opacity = '.4';
+      readyBtn.style.cursor = 'not-allowed';
+      readyStatus.textContent = 'Waiting for ' + (maxPlayers - joinedCount) + ' more player' + (maxPlayers - joinedCount !== 1 ? 's' : '') + ' to join before you can lock in...';
+      readyStatus.style.color = 'var(--text-muted)';
+    }
+  } else {
+    if (!allJoined) {
+      readyStatus.textContent = 'Waiting for ' + (maxPlayers - joinedCount) + ' more player' + (maxPlayers - joinedCount !== 1 ? 's' : '') + ' to join...';
     } else {
       readyStatus.textContent = 'Waiting for all players to place their ships...';
     }
@@ -1005,12 +1013,22 @@ function updatePlacementStatus() {
   const statusEl = document.getElementById('placement-status');
   const readyStatus = document.getElementById('ready-status');
   statusEl.textContent = placed + '/' + total + ' ships placed';
-  if (placed >= SHIPS_REQUIRED) {
+  const maxP = currentGame ? (currentGame.max_players || 2) : 2;
+  // We check player count from the last refreshLobby poll
+  const joinedP = document.__lobbyJoinedCount || 1;
+  const enoughPlayers = joinedP >= maxP;
+  if (placed >= SHIPS_REQUIRED && enoughPlayers) {
     btn.disabled = false;
     btn.style.opacity = '1';
     btn.style.cursor = 'pointer';
     readyStatus.textContent = 'Happy with your fleet? Lock it in!';
     readyStatus.style.color = 'var(--green)';
+  } else if (placed >= SHIPS_REQUIRED && !enoughPlayers) {
+    btn.disabled = true;
+    btn.style.opacity = '.4';
+    btn.style.cursor = 'not-allowed';
+    readyStatus.textContent = 'Ships placed! Waiting for other players to join...';
+    readyStatus.style.color = 'var(--text-muted)';
   } else {
     btn.disabled = true;
     btn.style.opacity = '.4';
@@ -1097,7 +1115,14 @@ async function enterGame(gid) {
   const players = pr.data;
   gameState.players = players.map((p, i) => ({...p, color:PLAYER_COLORS[i%PLAYER_COLORS.length], colorBg:PLAYER_BG[i%PLAYER_BG.length], idx:i}));
   // Set my ships from placement state
-  gameState.myShips = [...placementState.placedShips];
+  // Persist ships so board survives polling redraws
+  const savedShips = placementState.placedShips.length > 0 
+    ? placementState.placedShips 
+    : (JSON.parse(sessionStorage.getItem('ns_myships_' + gid) || 'null') || []);
+  if (placementState.placedShips.length > 0) {
+    sessionStorage.setItem('ns_myships_' + gid, JSON.stringify(placementState.placedShips));
+  }
+  gameState.myShips = savedShips;
   gameState.myHits = [];
   gameState.myMisses = [];
   gameState.opponentBoards = {};
@@ -1221,22 +1246,26 @@ function renderMyBoard() {
     cell.innerHTML = '';
     const isShip = gameState.myShips.some(s => s.r===r && s.c===c);
     const hitEntry = gameState.myHits.find(h => h.r===r && h.c===c);
-    const isMiss = gameState.myMisses.some(m => m.r===r && m.c===c);
+    // Only mark miss if opponent actually fired here AND it wasn't a ship hit
+    const isMiss = !hitEntry && gameState.myMisses.some(m => m.r===r && m.c===c);
     if (hitEntry) {
+      // Ship was here and got hit — show red X on green background
       cell.classList.add('hit');
+      cell.style.background = '#c0f0c8'; // greenish tint to show it was a ship
       const hitterIdx = hitEntry.hitter_idx !== undefined ? hitEntry.hitter_idx : 0;
       cell.dataset.hitter = hitterIdx;
-      // X mark
       const xEl = document.createElement('div');
       xEl.className = 'hit-x';
       xEl.innerHTML = `<svg width="60%" height="60%" viewBox="0 0 20 20"><line x1="2" y1="2" x2="18" y2="18" stroke="${PLAYER_COLORS[hitterIdx%PLAYER_COLORS.length]}" stroke-width="3" stroke-linecap="round"/><line x1="18" y1="2" x2="2" y2="18" stroke="${PLAYER_COLORS[hitterIdx%PLAYER_COLORS.length]}" stroke-width="3" stroke-linecap="round"/></svg>`;
       cell.appendChild(xEl);
     } else if (isMiss) {
+      // Opponent fired here but missed — gray dot, no ship here
       cell.classList.add('miss');
       const dot = document.createElement('div');
       dot.className = 'miss-dot';
       cell.appendChild(dot);
     } else if (isShip) {
+      // Undamaged ship cell — green
       cell.classList.add('ship');
       cell.style.cursor = 'default';
     }
@@ -1331,29 +1360,16 @@ async function onFire(r, c) {
   if (!gameState.opponentBoards[tid]) gameState.opponentBoards[tid] = {hits:[],misses:[]};
   if (result === 'hit') {
     gameState.opponentBoards[tid].hits.push({r, c});
-    // Check if this hit sank a ship (cumulative hit threshold)
-    const targetPlayer = gameState.players.find(p => p.player_id === tid);
-    const tName = targetPlayer ? targetPlayer.username : 'opponent';
-    const prevHitCount = (gameState.opponentBoards[tid].hits.length - 1);
-    const THRESHOLDS = [2, 5, 9]; // cumulative: patrol=2, +sub=5, +destroyer=9
-    const nowCount = gameState.opponentBoards[tid].hits.length;
-    const justSunk = THRESHOLDS.find(t => nowCount === t);
-    if (justSunk) {
-      const shipIdx = THRESHOLDS.indexOf(justSunk);
-      const shipName = SHIP_CONFIGS[shipIdx] ? SHIP_CONFIGS[shipIdx].name : 'Ship';
-      document.getElementById('game-status-msg').textContent = '🚢 YOU SUNK ' + tName.toUpperCase() + "'S " + shipName.toUpperCase() + '!';
-      toast('🚢 SUNK! ' + tName + "'s " + shipName, 4000);
-    } else {
-      toast('💥 HIT! ' + coordLabel(r,c));
-    }
+    toast('💥 HIT! ' + coordLabel(r, c));
   } else {
     gameState.opponentBoards[tid].misses.push({r, c});
     toast('💧 Miss at ' + coordLabel(r,c));
   }
   // Add to log
   const me = currentUser.prefName || currentUser.username;
-  const target = gameState.players.find(p => p.player_id === tid);
-  addMoveLog(me, target ? target.username : 'opponent', r, c, result);
+  const targetPlayer2 = gameState.players.find(p => p.player_id === tid);
+  const tName2 = targetPlayer2 ? targetPlayer2.username : 'opponent';
+  addMoveLog(me, tName2, r, c, result, currentUser.player_id, tid);
   // Check if my turn continues (hit = keep going)
   if (gameStatus === 'finished') {
     renderGameBoards();
@@ -1404,6 +1420,11 @@ async function loadMoves(gid, moves) {
   gameState.myHits = [];
   gameState.myMisses = [];
   gameState.moveLog = [];
+  // Restore myShips from sessionStorage if lost (e.g. after poll redraw)
+  if (gameState.myShips.length === 0 && currentGame) {
+    const saved = sessionStorage.getItem('ns_myships_' + currentGame.game_id);
+    if (saved) gameState.myShips = JSON.parse(saved);
+  }
   moves.forEach(m => {
     const shooterId = m.player_id;
     const targetId = m.target_player_id;
@@ -1454,74 +1475,27 @@ async function loadMoves(gid, moves) {
   updateTurnUI();
 }
 function detectSunkShips() {
-  // For each player, group consecutive hits by target.
-  // A "sunk" event is when hits on a target reach a ship-length boundary (2,3,4 consecutive).
-  // Simple heuristic: mark a sunk event after every SHIP_CONFIGS[n].len hits on same target.
-  const SHIP_LENGTHS = SHIP_CONFIGS.map(s => s.len).sort((a,b)=>a-b); // [2,3,4]
-  const hitsByTarget = {};
-  gameState.moveLog.forEach(m => {
-    if (m.result === 'hit') {
-      const key = m.targetId || m.target;
-      if (!hitsByTarget[key]) hitsByTarget[key] = [];
-      hitsByTarget[key].push(m);
-    }
-  });
-  // Mark sunk events: at hit counts matching cumulative ship lengths
-  gameState.sunkEvents = gameState.sunkEvents || {};
-  Object.entries(hitsByTarget).forEach(([tid, hits]) => {
-    const thresholds = [];
-    let sum = 0;
-    SHIP_LENGTHS.forEach(l => { sum += l; thresholds.push(sum); });
-    thresholds.forEach((thresh, i) => {
-      const key = tid + '_' + thresh;
-      if (hits.length >= thresh && !gameState.sunkEvents[key]) {
-        gameState.sunkEvents[key] = {
-          target: hits[thresh-1].target,
-          shooter: hits[thresh-1].shooter,
-          shipName: SHIP_CONFIGS[i] ? SHIP_CONFIGS[i].name : 'Ship'
-        };
-      }
-    });
-  });
+  // no-op — sunk detection removed per user request
 }
 function renderMoveLog() {
   const logEl = document.getElementById('move-log');
   logEl.innerHTML = '';
-  const sunkKeys = Object.keys(gameState.sunkEvents || {});
-  // Build a combined timeline
-  const entries = [...gameState.moveLog].map(m => ({...m, type:'move'}));
+  // Most recent first (column-reverse on container handles visual order)
   [...gameState.moveLog].reverse().forEach(m => {
     const div = document.createElement('div');
-    let cls = 'move-entry ';
-    let txt = '';
     if (m.result === 'hit') {
-      cls += 'hit-entry';
-      txt = `💥 ${m.shooter} → ${m.target} [${coordLabel(m.r,m.c)}] HIT`;
+      div.className = 'move-entry hit-entry';
+      div.textContent = '💥 ' + m.shooter + ' → ' + m.target + ' [' + coordLabel(m.r, m.c) + '] HIT';
     } else {
-      cls += 'miss-entry';
-      txt = `💧 ${m.shooter} → ${m.target} [${coordLabel(m.r,m.c)}] MISS`;
+      div.className = 'move-entry miss-entry';
+      div.textContent = '💧 ' + m.shooter + ' → ' + m.target + ' [' + coordLabel(m.r, m.c) + '] MISS';
     }
-    div.className = cls;
-    div.textContent = txt;
     logEl.appendChild(div);
   });
-  // Inject sunk events at top
-  if (sunkKeys.length > 0) {
-    const sunkDiv = document.createElement('div');
-    sunkDiv.style.cssText = 'border-bottom:1px solid var(--border);margin-bottom:6px;padding-bottom:6px';
-    sunkKeys.forEach(k => {
-      const ev = gameState.sunkEvents[k];
-      const d = document.createElement('div');
-      d.className = 'move-entry sunk-entry';
-      d.style.cssText = 'font-size:13px;font-weight:700;background:#fadbd8;color:var(--red);padding:6px 8px;border-radius:4px;margin-bottom:3px';
-      d.textContent = '🚢 ' + ev.shooter + ' SUNK ' + ev.target + "'s " + ev.shipName + '!';
-      sunkDiv.appendChild(d);
-    });
-    logEl.insertBefore(sunkDiv, logEl.firstChild);
-  }
 }
-function addMoveLog(shooter, target, r, c, result) {
-  gameState.moveLog.push({shooter, target, r, c, result});
+function addMoveLog(shooter, target, r, c, result, shooterId, targetId) {
+  const myIdx = gameState.players.findIndex(p => p.player_id === currentUser.player_id);
+  gameState.moveLog.push({shooter, target, r, c, result, shooterIdx:myIdx, shooterId, targetId});
   renderMoveLog();
 }
 function updateTurnUI() {
