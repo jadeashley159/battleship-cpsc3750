@@ -453,7 +453,7 @@ def place_ships(game_id):
 
     total = GamePlayer.query.filter_by(game_id=gid).count()
 
-    if placed == total:
+    if total == game.max_players and placed == total:
         game.status = "active"
         db.session.commit()
 
