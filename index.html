@@ -515,7 +515,7 @@ select.form-input{cursor:pointer}
 
 <script>
 // =================== STATE ====================
-const VERSION = 'v2.2';
+const VERSION = 'v2.3';
 const DEFAULT_SERVER = 'https://battleship-cpsc3750.onrender.com';
 let API = localStorage.getItem('ns_server') || DEFAULT_SERVER;
 let currentUser = null; // {player_id, username, prefName}
@@ -626,8 +626,11 @@ async function doLogin() {
     // Clean up the player we just accidentally created
     setAlert(alertEl, 'No account found for "' + username + '". Use Create Account to register.');
     return;
+  } else if (r.networkError) {
+    setAlert(alertEl, 'Cannot reach server. Check your connection and try again.');
+    return;
   } else {
-    setAlert(alertEl, 'Server error. Try again.');
+    setAlert(alertEl, 'Server error (' + r.status + '). Try again.');
     return;
   }
   currentUser = {player_id: pid, username, prefName: (stored && stored.prefName) || username};
@@ -654,8 +657,11 @@ async function doRegister() {
       return;
     }
     toast('Username exists — account linked to this device!');
+  } else if (r.networkError) {
+    setAlert(alertEl, 'Cannot reach server. Check your connection and try again.');
+    return;
   } else {
-    setAlert(alertEl, r.data.error || 'Registration failed');
+    setAlert(alertEl, r.data.error || 'Registration failed (' + r.status + ')');
     return;
   }
   const accounts = getLocal('ns_accounts') || {};
@@ -676,6 +682,13 @@ function doLogout() {
 
 // ==================== DASHBOARD ====================
 async function enterDashboard() {
+  // Restore saved server preference now that we're past login
+  const savedServer = localStorage.getItem('ns_server');
+  if (savedServer) {
+    API = savedServer;
+    const sel = document.getElementById('server-select');
+    if (sel) sel.value = savedServer;
+  }
   showPage('page-dashboard');
   document.getElementById('dash-user-label').textContent = currentUser.prefName || currentUser.username;
   document.getElementById('dash-version').textContent = VERSION;
@@ -1729,12 +1742,12 @@ function saveProfile() {
 // ==================== INIT ====================
 window.addEventListener('load', () => {
   document.getElementById('login-version').textContent = VERSION;
+  // Always use the home server for login/register — never a saved external server
+  // (a broken external server would silently block all auth attempts)
+  API = DEFAULT_SERVER;
   const params = new URLSearchParams(window.location.search);
   const sharedGame = params.get('game');
-  // If following a shared link, always show login so the right person signs in
-  // (don't auto-login as whoever last used this browser)
   if (sharedGame) {
-    // Store game id to pre-fill after login
     sessionStorage.setItem('pending_game', sharedGame);
     window.history.replaceState({}, '', window.location.pathname);
     return;
@@ -1743,6 +1756,8 @@ window.addEventListener('load', () => {
   const saved = getLocal('ns_current');
   if (saved && saved.player_id && saved.username) {
     currentUser = saved;
+    // Restore their preferred server after login
+    API = localStorage.getItem('ns_server') || DEFAULT_SERVER;
     enterDashboard();
   }
 });
